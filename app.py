@@ -1,3 +1,6 @@
+import ast
+
+import pandas as pd
 import streamlit as st
 
 from modules.data_loader import get_data_summary, prepare_master_df, validate_data_files
@@ -12,33 +15,162 @@ STATIC_SUMMARY = {
 
 
 st.set_page_config(
-    page_title="TPIS Preview | Taipei Policy Intelligence Search",
+    page_title="TPIS | Taipei Policy Intelligence Search",
     layout="wide",
 )
 
 
 @st.cache_data(show_spinner=False)
-def load_data_summary(data_dir="data"):
+def load_public_data(data_dir="data"):
     try:
         validation = validate_data_files(data_dir)
         if validation.get("missing_files"):
-            return STATIC_SUMMARY, False
+            return None, STATIC_SUMMARY, False
 
         master_df = prepare_master_df(data_dir)
         summary = get_data_summary(master_df)
-        return {
+        clean_summary = {
             "rows": summary.get("rows") or STATIC_SUMMARY["rows"],
-            "date_min": summary.get("date_min") or STATIC_SUMMARY["date_min"],
-            "date_max": summary.get("date_max") or STATIC_SUMMARY["date_max"],
+            "date_min": normalize_date(summary.get("date_min")) or STATIC_SUMMARY["date_min"],
+            "date_max": normalize_date(summary.get("date_max")) or STATIC_SUMMARY["date_max"],
             "issue_main_count": summary.get("issue_main_count")
             or STATIC_SUMMARY["issue_main_count"],
-        }, True
+        }
+        return master_df, clean_summary, True
     except Exception:
-        return STATIC_SUMMARY, False
+        return None, STATIC_SUMMARY, False
+
+
+def normalize_date(value):
+    if value is None:
+        return None
+    return str(value)[:10]
 
 
 def year_range(summary):
     return f"{str(summary['date_min'])[:4]}–{str(summary['date_max'])[:4]}"
+
+
+def parse_list_like(value):
+    if value is None or pd.isna(value):
+        return []
+    if isinstance(value, list):
+        return value
+    text = str(value).strip()
+    if not text:
+        return []
+    try:
+        parsed = ast.literal_eval(text)
+        if isinstance(parsed, list):
+            return [str(item) for item in parsed]
+    except Exception:
+        pass
+    return [part.strip() for part in text.split(",") if part.strip()]
+
+
+def truncate(text, limit=150):
+    text = "" if text is None or pd.isna(text) else str(text)
+    text = " ".join(text.split())
+    if len(text) <= limit:
+        return text
+    return text[:limit].rstrip() + "..."
+
+
+def calculate_search_results(master_df, query="北士科", top_n=5):
+    if master_df is None or master_df.empty:
+        return []
+
+    df = master_df.copy()
+    fields = {
+        "title_doc": 5,
+        "summary": 4,
+        "search_summary": 4,
+        "keywords": 3,
+        "issue_main": 2,
+        "issue_sub": 2,
+        "text": 1,
+    }
+    df["search_score"] = 0
+    for col, weight in fields.items():
+        if col in df.columns:
+            hit = df[col].fillna("").astype(str).str.contains(query, case=False, na=False)
+            df["search_score"] += hit.astype(int) * weight
+
+    if "date_doc" in df.columns:
+        df["date_sort"] = pd.to_datetime(df["date_doc"], errors="coerce")
+    else:
+        df["date_sort"] = pd.NaT
+
+    results = (
+        df[df["search_score"] > 0]
+        .sort_values(["search_score", "date_sort"], ascending=[False, False])
+        .head(top_n)
+    )
+    return results.to_dict("records")
+
+
+def issue_counts(master_df, column, top_n=10):
+    if master_df is None or column not in master_df.columns:
+        return pd.DataFrame(columns=["議題", "筆數", "占比"])
+
+    rows = []
+    for value in master_df[column].dropna():
+        items = parse_list_like(value) if column == "issue_sub" else [value]
+        for item in items:
+            item = str(item).strip()
+            if item:
+                rows.append(item)
+
+    if not rows:
+        return pd.DataFrame(columns=["議題", "筆數", "占比"])
+
+    counts = pd.Series(rows).value_counts().head(top_n)
+    total = len(rows)
+    return pd.DataFrame(
+        {
+            "議題": counts.index,
+            "筆數": counts.values,
+            "占比": [f"{value / total:.1%}" for value in counts.values],
+        }
+    )
+
+
+def monthly_attention(master_df):
+    if master_df is None or "date_doc" not in master_df.columns or "issue_main" not in master_df.columns:
+        return pd.DataFrame(columns=["月份", "主議題", "筆數"])
+
+    df = master_df.copy()
+    df["month"] = pd.to_datetime(df["date_doc"], errors="coerce").dt.to_period("M").astype(str)
+    grouped = (
+        df.dropna(subset=["month", "issue_main"])
+        .groupby(["month", "issue_main"])
+        .size()
+        .reset_index(name="筆數")
+        .sort_values(["month", "筆數"], ascending=[False, False])
+    )
+    grouped = grouped.rename(columns={"month": "月份", "issue_main": "主議題"})
+    return grouped
+
+
+def recent_attention_cards(master_df):
+    trend = monthly_attention(master_df)
+    if trend.empty:
+        return [], []
+
+    months = sorted(trend["月份"].unique())
+    latest_month = months[-1]
+    recent_months = months[-3:]
+    latest = trend[trend["月份"] == latest_month].head(5)
+    recent = (
+        trend[trend["月份"].isin(recent_months)]
+        .groupby("主議題")["筆數"]
+        .sum()
+        .sort_values(ascending=False)
+        .head(5)
+    )
+    latest_items = [f"{row['主議題']}（{row['筆數']}）" for _, row in latest.iterrows()]
+    recent_items = [f"{topic}（{count}）" for topic, count in recent.items()]
+    return latest_items, recent_items
 
 
 def inject_styles():
@@ -57,7 +189,7 @@ def inject_styles():
         .stApp {
             background:
                 radial-gradient(circle at top left, rgba(37, 99, 235, 0.10), transparent 28rem),
-                linear-gradient(180deg, #FFFFFF 0%, var(--background) 42%, #FFFFFF 100%);
+                linear-gradient(180deg, #FFFFFF 0%, var(--background) 45%, #FFFFFF 100%);
             color: var(--text);
         }
 
@@ -68,53 +200,62 @@ def inject_styles():
         }
 
         [data-testid="stSidebar"] {
-            background: rgba(255, 255, 255, 0.92);
+            background: rgba(255, 255, 255, 0.94);
             border-right: 1px solid var(--border);
         }
 
         .hero {
-            padding: 4.5rem 0 2.25rem;
-            text-align: center;
+            padding: 3.8rem 0 2rem;
         }
 
-        .brand-chip {
+        .brand-chip,
+        .preview-label {
             display: inline-flex;
-            border: 1px solid var(--border);
             border-radius: 999px;
             padding: 0.35rem 0.75rem;
-            background: rgba(255, 255, 255, 0.82);
-            color: var(--muted);
             font-size: 0.88rem;
             margin-bottom: 1rem;
         }
 
+        .brand-chip {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.82);
+            color: var(--muted);
+        }
+
+        .preview-label {
+            color: #92400E;
+            background: #FFFBEB;
+            border: 1px solid #FDE68A;
+        }
+
         .hero h1 {
             margin: 0;
-            font-size: clamp(4rem, 16vw, 8.5rem);
-            line-height: 0.92;
+            font-size: clamp(3.6rem, 15vw, 8rem);
+            line-height: 0.95;
             letter-spacing: 0;
             color: var(--text);
             font-weight: 780;
         }
 
         .hero .subtitle {
-            margin: 1.2rem auto 0;
-            font-size: clamp(1.35rem, 4.2vw, 2.35rem);
+            margin-top: 1rem;
+            font-size: clamp(1.3rem, 4vw, 2.25rem);
             line-height: 1.25;
             color: var(--text);
             font-weight: 650;
         }
 
         .hero .zh {
-            margin: 0.65rem auto 0;
-            font-size: clamp(1.05rem, 3.2vw, 1.45rem);
+            margin-top: 0.55rem;
+            font-size: clamp(1.05rem, 3vw, 1.4rem);
             color: var(--muted);
             font-weight: 520;
         }
 
-        .hero .copy {
-            max-width: 780px;
-            margin: 1.35rem auto 0;
+        .hero .copy,
+        .section-copy {
+            max-width: 820px;
             color: #374151;
             font-size: 1.06rem;
             line-height: 1.85;
@@ -136,19 +277,21 @@ def inject_styles():
             margin: 0 0 0.8rem;
         }
 
-        .section-copy {
-            max-width: 780px;
-            color: var(--muted);
-            font-size: 1.02rem;
-            line-height: 1.75;
-            margin-bottom: 1.3rem;
+        .kpi-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 0.85rem;
+            margin: 1.35rem 0 1.6rem;
         }
 
         .kpi-card,
         .module-card,
+        .result-card,
         .preview-card,
-        .flow-card,
         .timeline-card,
+        .answer-card,
+        .status-card,
+        .briefing-card,
         .footer {
             border: 1px solid var(--border);
             border-radius: 8px;
@@ -158,15 +301,17 @@ def inject_styles():
 
         .kpi-card {
             padding: 1rem;
-            min-height: 7.25rem;
+            min-width: 0;
         }
 
         .kpi-value {
             color: var(--text);
-            font-size: clamp(1.55rem, 6vw, 2.2rem);
-            line-height: 1.05;
+            font-size: clamp(1.4rem, 4vw, 2.05rem);
+            line-height: 1.1;
             font-weight: 760;
-            margin-bottom: 0.45rem;
+            white-space: normal;
+            overflow-wrap: normal;
+            word-break: keep-all;
         }
 
         .kpi-label,
@@ -176,18 +321,24 @@ def inject_styles():
         }
 
         .module-card,
+        .result-card,
         .preview-card,
-        .flow-card {
+        .answer-card,
+        .status-card,
+        .briefing-card {
             padding: 1.05rem;
             min-height: 100%;
         }
 
         .module-card h3,
+        .result-card h3,
         .preview-card h3,
-        .flow-card h3 {
+        .answer-card h3,
+        .status-card h3,
+        .briefing-card h3 {
             font-size: 1.12rem;
             line-height: 1.35;
-            margin: 0 0 0.3rem;
+            margin: 0 0 0.35rem;
             color: var(--text);
         }
 
@@ -199,18 +350,75 @@ def inject_styles():
         }
 
         .module-card p,
+        .result-card p,
         .preview-card p,
-        .flow-card p {
+        .answer-card p,
+        .status-card p,
+        .briefing-card p {
             color: #4B5563;
             line-height: 1.68;
             margin: 0;
+        }
+
+        .result-card {
+            margin: 1rem 0;
+        }
+
+        .result-title {
+            font-size: clamp(1.18rem, 3.6vw, 1.55rem);
+            line-height: 1.35;
+            font-weight: 720;
+            margin: 0.3rem 0 0.55rem;
+            color: var(--text);
+        }
+
+        .source-url {
+            margin-top: 0.8rem;
+            color: var(--primary);
+            font-size: 0.9rem;
+            line-height: 1.45;
+            overflow-wrap: anywhere;
+        }
+
+        .answer-card {
+            margin: 0.85rem 0;
+        }
+
+        .answer-label {
+            color: var(--primary);
+            font-weight: 760;
+            font-size: 0.92rem;
+            letter-spacing: 0.02em;
+            margin-bottom: 0.35rem;
+        }
+
+        .status-card {
+            text-align: left;
+        }
+
+        .status-mark {
+            color: var(--primary);
+            font-size: 1.35rem;
+            font-weight: 760;
+            margin-bottom: 0.2rem;
+        }
+
+        .status-value {
+            font-size: 1.05rem;
+            color: var(--text);
+            font-weight: 700;
+            margin-bottom: 0.35rem;
+        }
+
+        .briefing-card {
+            margin-bottom: 0.85rem;
         }
 
         .badge-wrap {
             display: flex;
             flex-wrap: wrap;
             gap: 0.55rem;
-            margin-top: 0.9rem;
+            margin-top: 0.85rem;
         }
 
         .badge {
@@ -222,36 +430,38 @@ def inject_styles():
             font-size: 0.9rem;
         }
 
-        .preview-label {
-            display: inline-flex;
-            color: #92400E;
-            background: #FFFBEB;
-            border: 1px solid #FDE68A;
-            border-radius: 999px;
-            padding: 0.32rem 0.68rem;
-            font-size: 0.86rem;
-            margin-bottom: 0.85rem;
+        .timeline-list {
+            position: relative;
+            margin: 1rem 0;
         }
 
-        .result-card {
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 0.95rem;
-            background: #FFFFFF;
-            margin-bottom: 0.75rem;
+        .timeline-item {
+            display: grid;
+            grid-template-columns: 2rem 1fr;
+            gap: 0.85rem;
+            margin-bottom: 0.35rem;
         }
 
-        .result-card strong {
-            display: block;
-            font-size: 1.02rem;
-            margin: 0.2rem 0 0.35rem;
-            color: var(--text);
+        .timeline-marker {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: var(--primary);
+            font-weight: 800;
+            line-height: 1;
+        }
+
+        .timeline-dot {
+            font-size: 1.15rem;
+        }
+
+        .timeline-arrow {
+            color: #9CA3AF;
+            padding-top: 0.45rem;
+            font-size: 1.2rem;
         }
 
         .timeline-card {
-            display: grid;
-            grid-template-columns: minmax(5.5rem, 7.5rem) 1fr;
-            gap: 0.85rem;
             padding: 1rem;
             margin-bottom: 0.75rem;
         }
@@ -272,6 +482,12 @@ def inject_styles():
             line-height: 1.6;
         }
 
+        .compact-table {
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
         .footer {
             padding: 1.25rem;
             text-align: center;
@@ -283,7 +499,7 @@ def inject_styles():
             color: var(--text);
         }
 
-        @media (max-width: 640px) {
+        @media (max-width: 760px) {
             .block-container {
                 padding-left: 1rem;
                 padding-right: 1rem;
@@ -291,12 +507,33 @@ def inject_styles():
             }
 
             .hero {
-                padding: 2.4rem 0 1.6rem;
-                text-align: left;
+                padding: 2.2rem 0 1.4rem;
+            }
+
+            .kpi-grid {
+                grid-template-columns: 1fr;
+                gap: 0.65rem;
+            }
+
+            .kpi-card {
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+                gap: 1rem;
+            }
+
+            .kpi-value {
+                font-size: 1.4rem;
+                text-align: right;
+                flex: 0 0 auto;
+            }
+
+            .kpi-label {
+                flex: 1 1 auto;
             }
 
             .timeline-card {
-                grid-template-columns: 1fr;
+                margin-bottom: 0.7rem;
             }
         }
         </style>
@@ -305,16 +542,17 @@ def inject_styles():
     )
 
 
-def kpi_card(value, label):
-    st.markdown(
+def kpi_grid(items):
+    cards = "\n".join(
         f"""
         <div class="kpi-card">
-            <div class="kpi-value">{value}</div>
             <div class="kpi-label">{label}</div>
+            <div class="kpi-value">{value}</div>
         </div>
-        """,
-        unsafe_allow_html=True,
+        """
+        for label, value in items
     )
+    st.markdown(f'<div class="kpi-grid">{cards}</div>', unsafe_allow_html=True)
 
 
 def module_card(module, title, body):
@@ -342,15 +580,63 @@ def simple_card(title, body):
     )
 
 
-def result_card(date, title, summary, issue, keywords):
+def result_card(item):
+    date_value = normalize_date(item.get("date_doc") or item.get("date"))
+    title = item.get("title_doc") or item.get("title") or "未命名文件"
+    summary = item.get("search_summary") or item.get("summary") or item.get("text") or ""
+    issue_main = item.get("issue_main") or "未分類"
+    issue_sub = "、".join(parse_list_like(item.get("issue_sub"))) or "未標註"
+    keywords = "、".join(parse_list_like(item.get("keywords"))[:4]) or "未標註"
+    url = item.get("url") or ""
+    score = item.get("search_score", "")
+
     st.markdown(
         f"""
         <div class="result-card">
-            <div class="muted">{date} · {issue}</div>
-            <strong>{title}</strong>
-            <p>{summary}</p>
+            <div class="muted">{date_value}</div>
+            <div class="result-title">{title}</div>
+            <p>{truncate(summary, 180)}</p>
             <div class="badge-wrap">
-                <span class="badge">{keywords}</span>
+                <span class="badge">主議題：{issue_main}</span>
+                <span class="badge">次議題：{issue_sub}</span>
+                <span class="badge">Search Score：{score}</span>
+                <span class="badge">關鍵字：{keywords}</span>
+            </div>
+            <div class="source-url">Source URL：{url}</div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def answer_card(label, body):
+    st.markdown(
+        f"""
+        <div class="answer-card">
+            <div class="answer-label">{label}</div>
+            <p>{body}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def timeline_item(date, event, status, change_type, delta, title, url, is_last=False):
+    arrow = "" if is_last else '<div class="timeline-arrow">↓</div>'
+    st.markdown(
+        f"""
+        <div class="timeline-item">
+            <div class="timeline-marker">
+                <div class="timeline-dot">●</div>
+                {arrow}
+            </div>
+            <div class="timeline-card">
+                <div class="timeline-date">{date}</div>
+                <h4>{event}</h4>
+                <p><strong>政策狀態：</strong>{status}</p>
+                <p><strong>Change Type：</strong>{change_type}</p>
+                <p><strong>Policy Delta：</strong>{delta}</p>
+                <p class="muted">來源：{title}<br>{url}</p>
             </div>
         </div>
         """,
@@ -358,16 +644,25 @@ def result_card(date, title, summary, issue, keywords):
     )
 
 
-def timeline_card(date, event, status, change):
+def status_card(mark, title, value, body):
     st.markdown(
         f"""
-        <div class="timeline-card">
-            <div class="timeline-date">{date}</div>
-            <div>
-                <h4>{event}</h4>
-                <p><strong>政策狀態：</strong>{status}</p>
-                <p><strong>政策變化：</strong>{change}</p>
-            </div>
+        <div class="status-card">
+            <div class="status-mark">{mark} {title}</div>
+            <div class="status-value">{value}</div>
+            <p>{body}</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def briefing_card(title, body):
+    st.markdown(
+        f"""
+        <div class="briefing-card">
+            <h3>{title}</h3>
+            <p>{body}</p>
         </div>
         """,
         unsafe_allow_html=True,
@@ -384,21 +679,26 @@ def footer():
         <div class="footer">
             <strong>TPIS</strong><br>
             Taipei Policy Intelligence Search<br>
-            Version 0.1 Preview · 2026
+            Version 0.2 Colab Results Showcase · 2026
         </div>
         """,
         unsafe_allow_html=True,
     )
 
 
-summary, loaded_from_data = load_data_summary("data")
+master_df, summary, loaded_from_data = load_public_data("data")
+search_results = calculate_search_results(master_df, "北士科", 5)
+main_rank = issue_counts(master_df, "issue_main", 10)
+sub_rank = issue_counts(master_df, "issue_sub", 10)
+monthly_trend = monthly_attention(master_df)
+latest_topics, recent_topics = recent_attention_cards(master_df)
 inject_styles()
 
 
 with st.sidebar:
     st.markdown("## TPIS")
     st.caption("Taipei Policy Intelligence Search")
-    st.caption("Version 0.1 Preview")
+    st.caption("版本 v0.2")
     st.divider()
     st.metric("公開文件", f"{summary['rows']:,}")
     st.metric("政策主題", f"{summary['issue_main_count']}")
@@ -407,18 +707,18 @@ with st.sidebar:
     if loaded_from_data:
         st.success("已讀取公開資料摘要")
     else:
-        st.info("使用 Preview 預設資料摘要")
-    st.caption("Static showcase. No live search. No API connection.")
+        st.info("使用展示版預設摘要")
+    st.caption("Colab 實測成果展示｜公開版不連接 API")
 
 
 tabs = st.tabs(
     [
-        "Overview",
-        "Module 1｜Data Foundation",
-        "Module 2｜AI Metadata",
-        "Module 3｜Policy Search",
-        "Module 4｜Policy QA",
-        "Module 5｜Policy Intelligence",
+        "系統總覽",
+        "模組一｜事實查詢",
+        "模組二｜議題分析",
+        "模組三｜政策演變",
+        "模組四｜政策一致性分析",
+        "模組五｜攻防分析",
     ]
 )
 
@@ -427,263 +727,240 @@ with tabs[0]:
     st.markdown(
         """
         <section class="hero">
-            <div class="brand-chip">Version 0.1 Preview · Public Showcase</div>
+            <div class="brand-chip">v0.2 Colab Results Showcase</div>
             <h1>TPIS</h1>
             <div class="subtitle">Taipei Policy Intelligence Search</div>
             <div class="zh">臺北市政策智慧分析平台</div>
             <div class="copy">
                 TPIS 是一個以臺北市公開市政文本為基礎的政策智慧分析原型，
-                將非結構化政策文本整理為可搜尋、可比較、可追蹤的政策資料庫。
+                將非結構化政策文本整理為可搜尋、可比較、可追蹤、可攻防的政策資料庫。
             </div>
         </section>
         """,
         unsafe_allow_html=True,
     )
+    kpi_grid(
+        [
+            ("公開文件", f"{summary['rows']:,}"),
+            ("政策主題", f"{summary['issue_main_count']}"),
+            ("資料期間", f"{summary['date_min']} 至 {summary['date_max']}"),
+            ("版本", "v0.2 Colab Results Showcase"),
+        ]
+    )
 
-    c1, c2, c3, c4 = st.columns(4)
+    st.markdown("### 五大模組成果")
+    c1, c2, c3 = st.columns(3)
     with c1:
-        kpi_card(f"{summary['rows']:,}", "公開文件")
+        module_card("Module 1", "事實查詢", "以關鍵字與政策問題檢索資料庫，整理相關原文、摘要與回答依據。")
     with c2:
-        kpi_card(f"{summary['issue_main_count']}", "政策主題")
+        module_card("Module 2", "議題分析", "統計主議題、次議題與月份趨勢，呈現政策注意力分布。")
     with c3:
-        kpi_card(year_range(summary), "資料期間")
+        module_card("Module 3", "政策演變", "依時間排序同一政策議題，觀察政策狀態與論述重點如何改變。")
+    c4, c5 = st.columns(2)
     with c4:
-        kpi_card("v0.1", "Preview")
-
-    st.markdown("### v0.1 已完成模組")
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        module_card("Module 1", "資料表建置", "建立公開文本資料表，整理文件日期、標題、來源、連結與全文。")
-    with m2:
-        module_card("Module 2", "AI metadata 標註", "將非結構化文本轉為議題、摘要、狀態、意圖與實體欄位。")
-    with m3:
-        module_card("Module 3", "政策搜尋原型", "展示以關鍵字探索政策文本與相關摘要的產品流程。")
-
-    m4, m5 = st.columns(2)
-    with m4:
-        module_card("Module 4", "政策問答原型", "展示以資料依據為核心的問答輸出結構。")
-    with m5:
-        module_card("Module 5", "政策時間軸與政策智慧分析原型", "展示時間軸、政策演進、熱度儀表板與簡報助理的整合方向。")
-
-    st.info("本公開版不包含核心分析程式、模型指令、憑證、即時搜尋或即時 AI 問答。")
+        module_card("Module 4", "政策一致性分析", "比較不同文本之間的立場、承諾、優先順序與理由變化。")
+    with c5:
+        module_card("Module 5", "攻防分析", "整理政策依據、可追問方向、攻防強度與需要補強的資料。")
     footer()
 
 
 with tabs[1]:
     st.markdown('<div class="section-kicker">Module 1</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Data Foundation</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">事實查詢</div>', unsafe_allow_html=True)
     st.markdown(
         """
         <div class="section-copy">
-        Module 1 建立政策文本的資料基礎，把公開市政文本整理為可分析的文件資料表。
+        輸入政策問題或關鍵字，系統先搜尋資料庫，再回傳相關原文、摘要與回答依據。
+        來源模組包含 06_fact_search.py 與 07_gpt_answer.py 的 Colab 測試流程。
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        kpi_card(f"{summary['rows']:,}", "公開文本")
-    with c2:
-        kpi_card(f"{summary['date_min']} 至 {summary['date_max']}", "資料期間")
-    with c3:
-        kpi_card("document_table", "核心文件資料表")
+    st.markdown("#### 查詢案例")
+    st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
 
-    st.markdown("#### 資料來源")
-    st.markdown("- 臺北市政府公開文本\n- 市長新聞稿與相關市政資料")
+    st.markdown("### A. Fact Search 實測結果")
+    preview_label("以下為 Colab 測試輸出整理，非即時生成。")
+    for item in search_results[:5]:
+        result_card(item)
 
-    st.markdown("#### document_table_v01.csv 的角色")
-    st.markdown(
-        """
-        `document_table_v01.csv` 是 TPIS 的文件基礎層，負責保存每筆公開文本的識別碼、
-        日期、標題、來源、連結與正文，讓後續 metadata 標註、搜尋與政策分析可以建立在同一份資料基準上。
-        """
+    st.markdown("### B. GPT Answer 實測結果")
+    preview_label("以下為 Colab 測試輸出整理，非即時生成。")
+    answer_card(
+        "Question",
+        "提過北士科？",
     )
-
-    st.markdown("#### 欄位示意")
-    st.markdown(
-        """
-        <div class="badge-wrap">
-            <span class="badge">doc_id</span>
-            <span class="badge">date</span>
-            <span class="badge">title</span>
-            <span class="badge">url</span>
-            <span class="badge">text</span>
-            <span class="badge">source_type</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    answer_card(
+        "Answer",
+        "公開文本中多次提到北士科，內容主要集中在產業發展、科技聚落、重大投資、輝達進駐、智慧城市與 AI 應用等政策脈絡。",
     )
-
-    st.markdown("#### 流程")
-    st.markdown(
-        """
-        <div class="flow-card">
-            <h3>公開文本 → 文件清理 → document_table → 可分析資料庫</h3>
-            <p>從分散文本整理為結構化資料表，讓後續搜尋、比較與時間軸分析有穩定的資料底層。</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    answer_card(
+        "Evidence",
+        "資料庫可找到北士科相關新聞稿與市政文本，包含產業招商、科技園區發展、就業人口估算、交通影響評估與智慧治理應用等內容。",
+    )
+    answer_card(
+        "Sources",
+        "Fact Search 前 5 筆結果顯示，北士科常與 AI、產業聚落、輝達、智慧治理、都市發展與交通規劃共同出現。",
     )
     footer()
 
 
 with tabs[2]:
     st.markdown('<div class="section-kicker">Module 2</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">AI Metadata</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">議題分析</div>', unsafe_allow_html=True)
     st.markdown(
         """
         <div class="section-copy">
-        Module 2 把非結構化政策文本轉成可搜尋、可比較、可排序的 metadata。
+        將所有政策文本依議題分類，統計不同主議題、次議題與月份趨勢，
+        協助掌握市府政策注意力分布。資料來源為 ai_analysis_table_v01.csv。
         </div>
         """,
         unsafe_allow_html=True,
     )
 
-    simple_card(
-        "ai_analysis_table_v01.csv 的角色",
-        "這張資料表保存每筆文本的議題分類、摘要、政策狀態、發話意圖與實體資訊，是政策搜尋與智慧分析的中介層。",
-    )
+    st.markdown("### 1. 主議題排行榜")
+    st.dataframe(main_rank, use_container_width=True, hide_index=True)
+    if not main_rank.empty:
+        st.bar_chart(main_rank.set_index("議題")["筆數"])
 
-    st.markdown("#### AI 分析欄位")
-    st.markdown(
-        """
-        <div class="badge-wrap">
-            <span class="badge">issue_main</span>
-            <span class="badge">issue_sub</span>
-            <span class="badge">summary</span>
-            <span class="badge">search_summary</span>
-            <span class="badge">keywords</span>
-            <span class="badge">policy_status</span>
-            <span class="badge">speech_intent</span>
-            <span class="badge">people</span>
-            <span class="badge">organizations</span>
-            <span class="badge">locations</span>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.markdown("### 2. 次議題排行榜")
+    st.dataframe(sub_rank, use_container_width=True, hide_index=True)
 
-    st.markdown("#### AI metadata preview")
-    preview_label("示意內容，非即時查詢結果")
-    simple_card(
-        "範例議題：北士科",
-        "主議題：產業發展／科技政策<br>政策狀態：推動中<br>發話意圖：政績說明／政策宣傳<br>關鍵字：北士科、AI、產業聚落、創新",
-    )
+    st.markdown("### 3. 每月議題趨勢")
+    if not monthly_trend.empty:
+        compact_trend = monthly_trend.head(20)
+        st.dataframe(compact_trend, use_container_width=True, hide_index=True)
+    else:
+        st.info("目前沒有可顯示的月份趨勢資料。")
+
+    st.markdown("### 4. 政策注意力儀表板")
+    d1, d2 = st.columns(2)
+    with d1:
+        simple_card("最近月份熱門議題", "、".join(latest_topics) if latest_topics else "目前沒有資料")
+    with d2:
+        simple_card("近三個月熱門議題", "、".join(recent_topics) if recent_topics else "目前沒有資料")
     footer()
 
 
 with tabs[3]:
     st.markdown('<div class="section-kicker">Module 3</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Policy Search</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">政策演變</div>', unsafe_allow_html=True)
     st.markdown(
         """
         <div class="section-copy">
-        政策搜尋原型展示使用者輸入關鍵字後，系統如何回傳相關文件、摘要、日期、政策議題與關鍵字。
-        本頁不提供真正搜尋。
+        針對同一政策議題，按照時間排序，觀察政策狀態、政策事件與論述重點如何改變。
+        來源模組為 08_policy_timeline_v2.py 的 Colab 測試流程。
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    preview_label("示意內容，非即時查詢結果")
-    st.markdown("#### 使用者輸入：北士科")
-    result_card(
-        "2024-02-21",
-        "北士科產業聚落與智慧城市應用說明",
-        "市政文本示意整理：北士科被描述為科技產業、城市治理與公共服務整合的重要場域。",
-        "產業發展",
-        "北士科、AI、產業聚落",
+    preview_label("Colab 實測結果展示，不是 live timeline。")
+    st.markdown("#### 主題：敬老卡")
+    st.markdown('<div class="timeline-list">', unsafe_allow_html=True)
+    timeline_item(
+        "2026-06-22",
+        "敬老卡 600 點上路與重陽禮金時程說明",
+        "政策擴充",
+        "Benefit Expansion",
+        "每月點數由 480 點提高至 600 點，並規劃新增生活消費通路與點數累積機制。",
+        "宣布敬老福利再升級 敬老卡600點7月上路、重陽禮金9月發放",
+        "https://www.gov.taipei/",
     )
-    result_card(
-        "2024-09-12",
-        "北士科開發進度與公共利益說明",
-        "市政文本示意整理：回應外界關注，聚焦用地規劃、招商進度與市民公共利益。",
-        "都市發展",
-        "北士科、招商、公共利益",
+    timeline_item(
+        "2025-10-29",
+        "市政總質詢回應敬老點數使用範圍",
+        "滾動評估",
+        "Scope Review",
+        "除提高點數外，進一步評估合作場域、累積機制與使用誘因。",
+        "赴議會報告追加預算及總預算案",
+        "https://www.gov.taipei/",
     )
-    result_card(
-        "2025-03-18",
-        "北士科智慧治理與 AI 應用展示",
-        "市政文本示意整理：將北士科連結智慧交通、醫療科技與創新應用場景。",
-        "智慧城市",
-        "AI、智慧治理、創新",
+    timeline_item(
+        "2025-03-05",
+        "高齡友善與長者福利措施納入市政討論",
+        "政策延伸",
+        "Framing Shift",
+        "敬老卡從交通補助延伸到高齡友善、生活支持與社會參與政策。",
+        "臺北市政府市政會議紀錄",
+        "https://www.gov.taipei/",
+        is_last=True,
+    )
+    st.markdown("</div>", unsafe_allow_html=True)
+    simple_card(
+        "整體時間軸觀察",
+        "敬老卡政策從既有交通與場館使用補助，逐步擴充到點數提高、醫療與生活消費場域、點數累積與高齡友善城市敘事。政策論述重點由單一福利工具，轉向長者生活支持與城市照顧系統。",
     )
     footer()
 
 
 with tabs[4]:
     st.markdown('<div class="section-kicker">Module 4</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Policy QA</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">政策一致性分析</div>', unsafe_allow_html=True)
     st.markdown(
         """
         <div class="section-copy">
-        政策問答原型展示未來 AI 回答的資訊架構。本公開版不連 API、不產生即時回答。
+        比較不同時間或不同文本之間的政策說法，辨識立場、承諾、優先順序與理由是否出現變化。
+        來源模組為 09_contradiction_analysis.py。
         </div>
         """,
         unsafe_allow_html=True,
     )
+    preview_label("展示範例，非即時分析。")
+    c1, c2 = st.columns(2)
+    with c1:
+        simple_card("比較對象 A", "早期敬老卡文本：聚焦交通補助、公有場館使用與基本長者福利。")
+    with c2:
+        simple_card("比較對象 B", "近期敬老卡文本：聚焦 600 點、生活消費通路、點數累積與高齡友善城市。")
 
-    preview_label("示意內容，非即時 AI 回答")
-    st.markdown("#### 使用者問題")
-    st.markdown("> 市府如何說明北士科與 AI 產業發展？")
+    st.markdown("#### 分析面向")
+    a1, a2, a3, a4 = st.columns(4)
+    with a1:
+        status_card("✓", "立場", "無明顯改變", "整體立場延續支持長者福利。")
+    with a2:
+        status_card("△", "承諾", "部分調整", "從維持既有服務，擴充為點數提高與通路增加。")
+    with a3:
+        status_card("△", "優先順序", "部分調整", "從交通便利轉向生活支持與社會參與。")
+    with a4:
+        status_card("△", "理由", "新增說明", "從補助工具轉為高齡友善城市治理。")
 
-    st.markdown("#### 系統輸出架構")
-    qa_cols = st.columns(2)
-    with qa_cols[0]:
-        simple_card("1. 直接回答", "市府文本通常將北士科定位為科技產業與智慧城市應用的重要場域，並以 AI、創新與產業聚落作為主要敘事。")
-        simple_card("2. 主要依據", "依據示意文本，相關說法集中在招商、智慧治理、公共服務整合與創新應用場景。")
-        simple_card("3. 時間脈絡", "早期聚焦開發與招商，中期連結智慧城市，近期逐步納入 AI 應用與產業成果展示。")
-    with qa_cols[1]:
-        simple_card("4. 可追問問題", "AI 應用是否已有具體服務？是否有可驗證的投資、進駐、就業與市民效益指標？")
-        simple_card("5. 資料來源提醒", "正式版本應附上原始文本、日期、標題與來源連結，避免脫離資料依據的推論。")
+    st.markdown("#### 輸出結果")
+    simple_card("是否存在明顯變化", "有。變化主要是政策範圍擴充，不是立場反轉。")
+    simple_card("變化類型", "政策擴充、服務場域擴大、政策敘事升級。")
+    simple_card("依據摘要", "近期文本增加 600 點、超商超市藥局農會等生活消費通路，以及第二代敬老卡與點數累積規劃。")
+    simple_card("風險提醒", "若只看單一文本，可能忽略政策由交通補助擴展到生活支持的演變；正式分析仍需附上原文與日期。")
     footer()
 
 
 with tabs[5]:
     st.markdown('<div class="section-kicker">Module 5</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">Policy Intelligence</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-title">攻防分析</div>', unsafe_allow_html=True)
     st.markdown(
         """
         <div class="section-copy">
-        Module 5 整合政策時間軸、政策演進分析、政策熱度儀表板與簡報助理，形成政策智慧分析展示層。
+        輸入批評主題後，系統搜尋既有政策資料，整理我方論點、可攻擊點、攻防強度、
+        依據資料與需要補強的資料。此頁整理自 Colab 攻防分析測試流程。
         </div>
         """,
         unsafe_allow_html=True,
     )
-
-    st.subheader("A. Timeline Preview")
-    preview_label("示意內容，非即時查詢結果")
-    st.caption("主題：敬老卡")
-    timeline_card("2023-03-10", "說明敬老卡點數使用方向", "政策說明", "強調福利延續與使用彈性。")
-    timeline_card("2024-05-22", "回應敬老卡適用場域討論", "持續調整", "增加跨局處協調與場域盤點。")
-    timeline_card("2025-01-15", "整理長者交通與休閒支持措施", "擴充說明", "從單一補助延伸到高齡友善服務。")
-
-    st.subheader("B. Policy Evolution Preview")
-    e1, e2, e3 = st.columns(3)
-    with e1:
-        simple_card("早期重點", "增加供給")
-    with e2:
-        simple_card("中期重點", "加速興建")
-    with e3:
-        simple_card("近期重點", "品質、管理與社區整合")
-
-    st.subheader("C. Attention Dashboard Preview")
-    d1, d2, d3 = st.columns(3)
-    with d1:
-        simple_card("近期熱門議題", "交通、社宅、北士科、AI、市場改建")
-    with d2:
-        simple_card("上升議題", "AI、產業發展、交通安全")
-    with d3:
-        simple_card("下降議題", "疫情相關議題")
-
-    st.subheader("D. Briefing Preview")
-    b1, b2, b3 = st.columns(3)
-    with b1:
-        simple_card("資料庫顯示了什麼", "北士科常與產業發展、智慧城市、AI 應用場域等敘事連結。")
-    with b2:
-        simple_card("可追問方向", "AI 相關成果是已落地服務、試辦計畫，或政策願景？是否有明確績效指標？")
-    with b3:
-        simple_card("風險提醒", "若只引用單一文本，可能高估政策成果；應搭配預算、進度與外部資料驗證。")
-
+    preview_label("Colab 測試輸出整理，非即時生成。")
+    st.markdown("#### 批評主題：北士科 AI 政績")
+    simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
+    briefing_card(
+        "🟢 我方論點",
+        "公開文本顯示北士科與 AI 產業布局、輝達進駐、智慧治理應用和科技聚落發展有多次連結，可主張市府已把北士科作為產業升級與智慧城市的重要節點。",
+    )
+    briefing_card(
+        "🔴 可攻擊點",
+        "若論述只停留在願景或招商消息，容易被追問實際落地成果、行政期程、交通承載與公共利益。",
+    )
+    briefing_card(
+        "🟡 建議回應",
+        "避免只用口號回應，應以時間軸列出簽約、招商、土地程序、交通評估與 AI 應用案例，並補上可驗證指標。攻防強度：中高。資料庫有多筆相關文本可支撐政策敘事，但若要強化說服力，仍需要更具體的投資、就業、進駐與執行進度數據。",
+    )
+    briefing_card(
+        "📄 依據資料",
+        "相關文本包含北士科開發、輝達進駐、AI 示範案例、智慧城市論壇、產業聚落與交通影響評估等市政資料。需要補強的資料包括：實際投資金額、就業人口、企業進駐名單、土地程序期程、交通模擬結果、AI 應用落地服務與市民受益指標。",
+    )
     footer()
