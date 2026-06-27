@@ -451,19 +451,23 @@ def inject_styles():
             display: flex;
             flex-direction: column;
             align-items: center;
-            color: var(--primary);
-            font-weight: 800;
-            line-height: 1;
         }
 
         .timeline-dot {
-            font-size: 1.15rem;
+            width: 0.78rem;
+            height: 0.78rem;
+            border-radius: 999px;
+            background: var(--primary);
+            border: 3px solid #DBEAFE;
+            margin-top: 1.1rem;
+            box-sizing: content-box;
         }
 
-        .timeline-arrow {
-            color: #9CA3AF;
-            padding-top: 0.45rem;
-            font-size: 1.2rem;
+        .timeline-line {
+            width: 2px;
+            min-height: 6.2rem;
+            background: var(--border);
+            margin-top: 0.35rem;
         }
 
         .timeline-card {
@@ -629,13 +633,13 @@ def answer_card(label, body):
 
 
 def timeline_item(date, event, status, change_type, delta, title, url, is_last=False):
-    arrow = "" if is_last else '<div class="timeline-arrow">↓</div>'
+    line = "" if is_last else '<div class="timeline-line"></div>'
     st.markdown(
         f"""
         <div class="timeline-item">
             <div class="timeline-marker">
-                <div class="timeline-dot">●</div>
-                {arrow}
+                <div class="timeline-dot"></div>
+                {line}
             </div>
             <div class="timeline-card">
                 <div class="timeline-date">{date}</div>
@@ -962,19 +966,19 @@ with tabs[5]:
     st.markdown("#### 批評主題：北士科 AI 政績")
     simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
     briefing_card(
-        "🟢 市府資料庫顯示了什麼",
+        "🟢 資料顯示",
         "市府公開文本中，北士科經常與 AI、輝達、智慧城市、產業聚落、招商與科技治理等主題共同出現。這些文本呈現市府將北士科放在產業發展與智慧城市敘事中的脈絡，但仍需要進一步檢視哪些內容已落地、哪些仍屬規劃或招商階段。",
     )
     briefing_card(
-        "🔴 可質疑重點",
+        "🔴 可質疑",
         "可追問是否已有具體落地成果、是否有明確 KPI、是否已有企業正式進駐與營運數據、交通承載與土地程序是否同步說明、公共利益如何衡量，以及相關敘事是否仍停留在願景包裝而非可驗證政績。",
     )
     briefing_card(
-        "🟡 可追問問題",
+        "🟡 可追問",
         "目前北士科已有多少 AI 相關企業正式進駐？輝達相關投資是否已有明確時程與可公開契約？市府所稱 AI 產業成果，有沒有產值、就業或招商 KPI？交通承載、土地程序與公共設施是否已同步到位？哪些成果已完成，哪些仍只是規劃或招商階段？",
     )
     briefing_card(
-        "📄 可引用資料",
+        "📄 可引用",
         "可引用市府新聞稿、市政會議資料，以及北士科、AI、輝達、招商、智慧城市相關公開文本。需要補強的資料包括預算、工程進度、KPI、招商成果、正式進駐與營運數據、交通評估、土地程序與公共利益指標。",
     )
     footer()
