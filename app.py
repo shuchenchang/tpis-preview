@@ -853,7 +853,7 @@ with tabs[3]:
         "敬老卡從交通補助延伸到高齡友善、生活支持與社會參與政策。",
         "臺北市政府市政會議紀錄",
         "https://www.gov.taipei/",
-        is_last=True,
+
     )
     simple_card(
         "整體時間軸觀察",
