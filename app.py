@@ -1,4 +1,5 @@
 import ast
+import html
 
 import pandas as pd
 import streamlit as st
@@ -12,6 +13,8 @@ STATIC_SUMMARY = {
     "date_max": "2026-06-24",
     "issue_main_count": 18,
 }
+
+PREVIEW_NOTICE = "展示範例，非即時分析。"
 
 
 st.set_page_config(
@@ -442,9 +445,9 @@ def inject_styles():
 
         .timeline-item {
             display: grid;
-            grid-template-columns: 2rem 1fr;
-            gap: 0.85rem;
-            margin-bottom: 0.35rem;
+            grid-template-columns: 2.2rem 1fr;
+            gap: 1rem;
+            margin-bottom: 0;
         }
 
         .timeline-marker {
@@ -454,41 +457,50 @@ def inject_styles():
         }
 
         .timeline-dot {
-            width: 0.78rem;
-            height: 0.78rem;
+            width: 0.82rem;
+            height: 0.82rem;
             border-radius: 999px;
-            background: var(--primary);
-            border: 3px solid #DBEAFE;
+            background: #FFFFFF;
+            border: 2px solid #9CA3AF;
             margin-top: 1.1rem;
             box-sizing: content-box;
         }
 
         .timeline-line {
             width: 2px;
-            min-height: 6.2rem;
+            flex: 1;
+            min-height: 7.8rem;
             background: var(--border);
-            margin-top: 0.35rem;
+            margin-top: 0.45rem;
         }
 
         .timeline-card {
-            padding: 1rem;
-            margin-bottom: 0.75rem;
+            padding: 1.05rem 1.1rem;
+            margin-bottom: 1rem;
+            background: #F9FAFB;
+            border-color: #E5E7EB;
+            box-shadow: 0 10px 30px rgba(17, 24, 39, 0.04);
         }
 
         .timeline-date {
-            color: var(--primary);
+            color: #6B7280;
             font-weight: 740;
+            font-size: 0.92rem;
+            margin-bottom: 0.35rem;
         }
 
         .timeline-card h4 {
             margin: 0 0 0.25rem;
-            font-size: 1.02rem;
+            font-size: 1.06rem;
+            line-height: 1.45;
         }
 
         .timeline-card p {
             margin: 0.18rem 0;
             color: #4B5563;
             line-height: 1.6;
+            word-break: normal;
+            overflow-wrap: break-word;
         }
 
         .compact-table {
@@ -548,47 +560,40 @@ def inject_styles():
 
 
 def kpi_grid(items):
-    cards = []
     for label, value in items:
-        cards.append(
-            f"""
-            <div class="kpi-card">
-                <div class="kpi-label">{label}</div>
-                <div class="kpi-value">{value}</div>
-            </div>
-            """
-        )
-    html = """
-    <div class="kpi-grid">
-        {cards}
-    </div>
-    """.format(cards="\n".join(cards))
-    st.markdown(html, unsafe_allow_html=True)
+        with st.container(border=True):
+            st.caption(label)
+            st.markdown(f"### {value}")
+
+
+def system_workflow():
+    steps = [
+        "Public Documents",
+        "AI Metadata",
+        "Policy Database",
+        "Search",
+        "Analysis",
+        "Briefing",
+    ]
+    st.markdown("## System Workflow")
+    for index, step in enumerate(steps):
+        with st.container(border=True):
+            st.markdown(f"**{step}**")
+        if index < len(steps) - 1:
+            st.markdown("↓")
 
 
 def module_card(module, title, body):
-    st.markdown(
-        f"""
-        <div class="module-card">
-            <div class="eyebrow">{module}</div>
-            <h3>{title}</h3>
-            <p>{body}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.caption(module)
+        st.markdown(f"### {title}")
+        st.markdown(body)
 
 
 def simple_card(title, body):
-    st.markdown(
-        f"""
-        <div class="preview-card">
-            <h3>{title}</h3>
-            <p>{body}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.markdown(f"### {title}")
+        st.markdown(body)
 
 
 def result_card(item):
@@ -601,53 +606,42 @@ def result_card(item):
     url = item.get("url") or ""
     score = item.get("search_score", "")
 
-    st.markdown(
-        f"""
-        <div class="result-card">
-            <div class="muted">{date_value}</div>
-            <div class="result-title">{title}</div>
-            <p>{truncate(summary, 180)}</p>
-            <div class="badge-wrap">
-                <span class="badge">主議題：{issue_main}</span>
-                <span class="badge">次議題：{issue_sub}</span>
-                <span class="badge">Search Score：{score}</span>
-                <span class="badge">關鍵字：{keywords}</span>
-            </div>
-            <div class="source-url">Source URL：{url}</div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.caption(date_value)
+        st.markdown(f"### {title}")
+        st.markdown(truncate(summary, 180))
+        st.markdown(
+            f"**主議題：** {issue_main}  \n"
+            f"**次議題：** {issue_sub}  \n"
+            f"**Search Score：** {score}  \n"
+            f"**關鍵字：** {keywords}"
+        )
+        st.caption(f"Source URL：{url}")
 
 
 def answer_card(label, body):
-    st.markdown(
-        f"""
-        <div class="answer-card">
-            <div class="answer-label">{label}</div>
-            <p>{body}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.markdown(f"### {label}")
+        st.markdown(body)
 
 
 def timeline_item(date, event, status, change_type, delta, title, url, is_last=False):
-    line = "" if is_last else '<div class="timeline-line"></div>'
+    line_html = "" if is_last else '<div class="timeline-line"></div>'
     st.markdown(
         f"""
         <div class="timeline-item">
             <div class="timeline-marker">
                 <div class="timeline-dot"></div>
-                {line}
+                {line_html}
             </div>
             <div class="timeline-card">
-                <div class="timeline-date">{date}</div>
-                <h4>{event}</h4>
-                <p><strong>政策狀態：</strong>{status}</p>
-                <p><strong>Change Type：</strong>{change_type}</p>
-                <p><strong>Policy Delta：</strong>{delta}</p>
-                <p class="muted">來源：{title}<br>{url}</p>
+                <div class="timeline-date">{html.escape(date)}</div>
+                <h4>{html.escape(event)}</h4>
+                <p><strong>政策狀態：</strong>{html.escape(status)}</p>
+                <p><strong>Change Type：</strong>{html.escape(change_type)}</p>
+                <p><strong>Policy Delta：</strong>{html.escape(delta)}</p>
+                <p><strong>來源：</strong>{html.escape(title)}</p>
+                <p><strong>URL：</strong>{html.escape(url)}</p>
             </div>
         </div>
         """,
@@ -656,45 +650,27 @@ def timeline_item(date, event, status, change_type, delta, title, url, is_last=F
 
 
 def status_card(mark, title, value, body):
-    st.markdown(
-        f"""
-        <div class="status-card">
-            <div class="status-mark">{mark} {title}</div>
-            <div class="status-value">{value}</div>
-            <p>{body}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.markdown(f"### {mark} {title}")
+        st.markdown(f"**{value}**")
+        st.markdown(body)
 
 
 def briefing_card(title, body):
-    st.markdown(
-        f"""
-        <div class="briefing-card">
-            <h3>{title}</h3>
-            <p>{body}</p>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.markdown(f"### {title}")
+        st.markdown(body)
 
 
-def preview_label(text):
-    st.markdown(f'<div class="preview-label">{text}</div>', unsafe_allow_html=True)
+def preview_label(text=PREVIEW_NOTICE):
+    st.warning(PREVIEW_NOTICE)
 
 
 def footer():
-    st.markdown(
-        """
-        <div class="footer">
-            <strong>TPIS</strong><br>
-            Taipei Policy Intelligence Search<br>
-            Version 0.2 Colab Results Showcase · 2026
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.divider()
+    st.caption("TPIS")
+    st.caption("Taipei Policy Intelligence Search")
+    st.caption("Version 0.2 Colab Results Showcase · 2026")
 
 
 master_df, summary, loaded_from_data = load_public_data("data")
@@ -725,30 +701,28 @@ with st.sidebar:
 tabs = st.tabs(
     [
         "系統總覽",
-        "模組一｜事實查詢",
-        "模組二｜議題分析",
-        "模組三｜政策演變",
-        "模組四｜政策一致性分析",
-        "模組五｜攻防分析",
+        "事實查詢",
+        "議題分析",
+        "政策演變",
+        "政策一致性",
+        "攻防分析",
     ]
 )
 
 
 with tabs[0]:
+    st.caption("v0.2 Colab Results Showcase")
+    st.title("TPIS")
+    st.subheader("Taipei Policy Intelligence Search")
     st.markdown(
-        """
-        <section class="hero">
-            <div class="brand-chip">v0.2 Colab Results Showcase</div>
-            <h1>TPIS</h1>
-            <div class="subtitle">Taipei Policy Intelligence Search</div>
-            <div class="zh">臺北市政策智慧分析平台</div>
-            <div class="copy">
-                TPIS 是一個以臺北市公開市政文本為基礎的政策智慧分析原型，
-                將非結構化政策文本整理為可搜尋、可比較、可追蹤、可攻防的政策資料庫。
-            </div>
-        </section>
-        """,
-        unsafe_allow_html=True,
+        "AI-powered policy intelligence platform for structured retrieval, "
+        "analysis and briefing of public policy documents."
+    )
+    preview_label()
+    st.markdown("臺北市政策智慧分析平台")
+    st.markdown(
+        "TPIS 是一個以臺北市公開市政文本為基礎的政策智慧分析原型，"
+        "將非結構化政策文本整理為可搜尋、可比較、可追蹤、可攻防的政策資料庫。"
     )
     kpi_grid(
         [
@@ -758,6 +732,7 @@ with tabs[0]:
             ("版本", "v0.2 Colab Results Showcase"),
         ]
     )
+    system_workflow()
 
     st.markdown("### 五大模組成果")
     c1, c2, c3 = st.columns(3)
@@ -776,28 +751,25 @@ with tabs[0]:
 
 
 with tabs[1]:
-    st.markdown('<div class="section-kicker">Module 1</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">事實查詢</div>', unsafe_allow_html=True)
+    st.caption("Module 1")
+    st.header("事實查詢")
+    st.markdown("快速搜尋公開政策文本，提供可追溯的引用依據。")
+    preview_label()
     st.markdown(
-        """
-        <div class="section-copy">
-        輸入政策問題或關鍵字，系統先搜尋資料庫，再回傳相關原文、摘要與回答依據。
-        來源模組包含 06_fact_search.py 與 07_gpt_answer.py 的 Colab 測試流程。
-        </div>
-        """,
-        unsafe_allow_html=True,
+        "輸入政策問題或關鍵字，系統先搜尋資料庫，再回傳相關原文、摘要與回答依據。"
+        "來源模組包含 06_fact_search.py 與 07_gpt_answer.py 的 Colab 測試流程。"
     )
 
     st.markdown("#### 查詢案例")
     st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
 
     st.markdown("### A. Fact Search 實測結果")
-    preview_label("以下為 Colab 測試輸出整理，非即時生成。")
+    preview_label()
     for item in search_results[:5]:
         result_card(item)
 
     st.markdown("### B. GPT Answer 實測結果")
-    preview_label("以下為 Colab 測試輸出整理，非即時生成。")
+    preview_label()
     answer_card(
         "Question",
         "提過北士科？",
@@ -818,16 +790,13 @@ with tabs[1]:
 
 
 with tabs[2]:
-    st.markdown('<div class="section-kicker">Module 2</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">議題分析</div>', unsafe_allow_html=True)
+    st.caption("Module 2")
+    st.header("議題分析")
+    st.markdown("自動統計政策議題分類、關注重點與議題分布。")
+    preview_label()
     st.markdown(
-        """
-        <div class="section-copy">
-        將所有政策文本依議題分類，統計不同主議題、次議題與月份趨勢，
-        協助掌握市府政策注意力分布。資料來源為 ai_analysis_table_v01.csv。
-        </div>
-        """,
-        unsafe_allow_html=True,
+        "將所有政策文本依議題分類，統計不同主議題、次議題與月份趨勢，"
+        "協助掌握市府政策注意力分布。資料來源為 ai_analysis_table_v01.csv。"
     )
 
     st.markdown("### 1. 主議題排行榜")
@@ -853,20 +822,15 @@ with tabs[2]:
 
 
 with tabs[3]:
-    st.markdown('<div class="section-kicker">Module 3</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">政策演變</div>', unsafe_allow_html=True)
+    st.caption("Module 3")
+    st.header("政策演變")
+    st.markdown("依時間軸整理政策發展歷程，觀察重要調整與演變。")
+    preview_label()
     st.markdown(
-        """
-        <div class="section-copy">
-        針對同一政策議題，按照時間排序，觀察政策狀態、政策事件與論述重點如何改變。
-        來源模組為 08_policy_timeline_v2.py 的 Colab 測試流程。
-        </div>
-        """,
-        unsafe_allow_html=True,
+        "針對同一政策議題，按照時間排序，觀察政策狀態、政策事件與論述重點如何改變。"
+        "來源模組為 08_policy_timeline_v2.py 的 Colab 測試流程。"
     )
-    preview_label("Colab 實測結果展示，不是 live timeline。")
     st.markdown("#### 主題：敬老卡")
-    st.markdown('<div class="timeline-list">', unsafe_allow_html=True)
     timeline_item(
         "2026-06-22",
         "敬老卡 600 點上路與重陽禮金時程說明",
@@ -904,7 +868,6 @@ with tabs[3]:
         "https://www.gov.taipei/",
         is_last=True,
     )
-    st.markdown("</div>", unsafe_allow_html=True)
     simple_card(
         "整體時間軸觀察",
         "敬老卡政策從既有交通與場館使用補助，逐步擴充到點數提高、醫療與生活消費場域、點數累積與高齡友善城市敘事。政策論述重點由單一福利工具，轉向長者生活支持與城市照顧系統。",
@@ -913,18 +876,14 @@ with tabs[3]:
 
 
 with tabs[4]:
-    st.markdown('<div class="section-kicker">Module 4</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">政策一致性分析</div>', unsafe_allow_html=True)
+    st.caption("Module 4")
+    st.header("政策一致性分析")
+    st.markdown("比較不同時期政策內容，辨識可能的立場與策略變化。")
+    preview_label()
     st.markdown(
-        """
-        <div class="section-copy">
-        比較不同時間或不同文本之間的政策說法，辨識立場、承諾、優先順序與理由是否出現變化。
-        來源模組為 09_contradiction_analysis.py。
-        </div>
-        """,
-        unsafe_allow_html=True,
+        "比較不同時間或不同文本之間的政策說法，辨識立場、承諾、優先順序與理由是否出現變化。"
+        "來源模組為 09_contradiction_analysis.py。"
     )
-    preview_label("展示範例，非即時分析。")
     c1, c2 = st.columns(2)
     with c1:
         simple_card("比較對象 A", "早期敬老卡文本：聚焦交通補助、公有場館使用與基本長者福利。")
@@ -932,15 +891,10 @@ with tabs[4]:
         simple_card("比較對象 B", "近期敬老卡文本：聚焦 600 點、生活消費通路、點數累積與高齡友善城市。")
 
     st.markdown("#### 分析面向")
-    a1, a2, a3, a4 = st.columns(4)
-    with a1:
-        status_card("✓", "立場", "無明顯改變", "整體立場延續支持長者福利。")
-    with a2:
-        status_card("△", "承諾", "部分調整", "從維持既有服務，擴充為點數提高與通路增加。")
-    with a3:
-        status_card("△", "優先順序", "部分調整", "從交通便利轉向生活支持與社會參與。")
-    with a4:
-        status_card("△", "理由", "新增說明", "從補助工具轉為高齡友善城市治理。")
+    status_card("✓", "立場", "無明顯改變", "整體立場延續支持長者福利。")
+    status_card("△", "承諾", "部分調整", "從維持既有服務，擴充為點數提高與通路增加。")
+    status_card("△", "優先順序", "部分調整", "從交通便利轉向生活支持與社會參與。")
+    status_card("△", "理由", "新增說明", "從補助工具轉為高齡友善城市治理。")
 
     st.markdown("#### 輸出結果")
     simple_card("是否存在明顯變化", "有。變化主要是政策範圍擴充，不是立場反轉。")
@@ -951,18 +905,14 @@ with tabs[4]:
 
 
 with tabs[5]:
-    st.markdown('<div class="section-kicker">Module 5</div>', unsafe_allow_html=True)
-    st.markdown('<div class="section-title">攻防分析</div>', unsafe_allow_html=True)
+    st.caption("Module 5")
+    st.header("攻防分析")
+    st.markdown("根據公開資料整理可引用資訊、可質疑重點與追問方向。")
+    preview_label()
     st.markdown(
-        """
-        <div class="section-copy">
-        輸入批評主題後，系統搜尋市府公開文本，整理市府可能主張、可質疑重點、
-        可追問問題與可引用資料，協助政策幕僚進行攻防準備。此頁整理自 Colab 攻防分析測試流程。
-        </div>
-        """,
-        unsafe_allow_html=True,
+        "輸入批評主題後，系統搜尋市府公開文本，整理市府可能主張、可質疑重點、"
+        "可追問問題與可引用資料，協助政策幕僚進行攻防準備。此頁整理自 Colab 攻防分析測試流程。"
     )
-    preview_label("Colab 測試輸出整理，非即時生成。")
     st.markdown("#### 批評主題：北士科 AI 政績")
     simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
     briefing_card(
