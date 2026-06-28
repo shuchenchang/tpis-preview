@@ -755,21 +755,15 @@ with tabs[1]:
     st.header("事實查詢")
     st.markdown("快速搜尋公開政策文本，提供可追溯的引用依據。")
     preview_label()
-    st.markdown(
-        "輸入政策問題或關鍵字，系統先搜尋資料庫，再回傳相關原文、摘要與回答依據。"
-        "來源模組包含 06_fact_search.py 與 07_gpt_answer.py 的 Colab 測試流程。"
-    )
 
     st.markdown("#### 查詢案例")
     st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
 
     st.markdown("### A. Fact Search 實測結果")
-    preview_label()
     for item in search_results[:5]:
         result_card(item)
 
     st.markdown("### B. GPT Answer 實測結果")
-    preview_label()
     answer_card(
         "Question",
         "提過北士科？",
@@ -794,10 +788,6 @@ with tabs[2]:
     st.header("議題分析")
     st.markdown("自動統計政策議題分類、關注重點與議題分布。")
     preview_label()
-    st.markdown(
-        "將所有政策文本依議題分類，統計不同主議題、次議題與月份趨勢，"
-        "協助掌握市府政策注意力分布。資料來源為 ai_analysis_table_v01.csv。"
-    )
 
     st.markdown("### 1. 主議題排行榜")
     st.dataframe(main_rank, use_container_width=True, hide_index=True)
@@ -826,10 +816,7 @@ with tabs[3]:
     st.header("政策演變")
     st.markdown("依時間軸整理政策發展歷程，觀察重要調整與演變。")
     preview_label()
-    st.markdown(
-        "針對同一政策議題，按照時間排序，觀察政策狀態、政策事件與論述重點如何改變。"
-        "來源模組為 08_policy_timeline_v2.py 的 Colab 測試流程。"
-    )
+ 
     st.markdown("#### 主題：敬老卡")
     timeline_item(
         "2026-06-22",
@@ -880,10 +867,7 @@ with tabs[4]:
     st.header("政策一致性分析")
     st.markdown("比較不同時期政策內容，辨識可能的立場與策略變化。")
     preview_label()
-    st.markdown(
-        "比較不同時間或不同文本之間的政策說法，辨識立場、承諾、優先順序與理由是否出現變化。"
-        "來源模組為 09_contradiction_analysis.py。"
-    )
+    
     c1, c2 = st.columns(2)
     with c1:
         simple_card("比較對象 A", "早期敬老卡文本：聚焦交通補助、公有場館使用與基本長者福利。")
@@ -909,10 +893,7 @@ with tabs[5]:
     st.header("攻防分析")
     st.markdown("根據公開資料整理可引用資訊、可質疑重點與追問方向。")
     preview_label()
-    st.markdown(
-        "輸入批評主題後，系統搜尋市府公開文本，整理市府可能主張、可質疑重點、"
-        "可追問問題與可引用資料，協助政策幕僚進行攻防準備。此頁整理自 Colab 攻防分析測試流程。"
-    )
+   
     st.markdown("#### 批評主題：北士科 AI 政績")
     simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
     briefing_card(
