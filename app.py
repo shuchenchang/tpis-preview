@@ -84,6 +84,20 @@ def truncate(text, limit=150):
     return text[:limit].rstrip() + "..."
 
 
+def relevance_label(score):
+    try:
+        score = int(score)
+    except (TypeError, ValueError):
+        score = 0
+    if score >= 20:
+        return "高度相關"
+    if score >= 10:
+        return "相關"
+    if score >= 4:
+        return "中度相關"
+    return "低度相關"
+
+
 def calculate_search_results(master_df, query="北士科", top_n=5):
     if master_df is None or master_df.empty:
         return []
@@ -715,22 +729,17 @@ def result_card(item):
     title = item.get("title_doc") or item.get("title") or "未命名文件"
     summary = item.get("search_summary") or item.get("summary") or item.get("text") or ""
     issue_main = item.get("issue_main") or "未分類"
-    issue_sub = "、".join(parse_list_like(item.get("issue_sub"))) or "未標註"
-    keywords = "、".join(parse_list_like(item.get("keywords"))[:4]) or "未標註"
+    issue_sub = "、".join(parse_list_like(item.get("issue_sub"))[:3]) or "未標註"
     url = item.get("url") or ""
-    score = item.get("search_score", "")
+    relevance = relevance_label(item.get("search_score"))
 
     with st.container(border=True):
-        st.caption(date_value)
-        st.markdown(f"### {title}")
-        st.markdown(truncate(summary, 180))
-        st.markdown(
-            f"**主議題：** {issue_main}  \n"
-            f"**次議題：** {issue_sub}  \n"
-            f"**Search Score：** {score}  \n"
-            f"**關鍵字：** {keywords}"
-        )
-        st.caption(f"Source URL：{url}")
+        st.caption(f"{date_value}｜相關度：{relevance}｜{issue_main}")
+        st.markdown(f"**{title}**")
+        st.markdown(truncate(summary, 80))
+        st.caption(f"次議題：{issue_sub}")
+        if url:
+            st.markdown(f"[查看原文]({url})")
 
 
 def answer_card(label, body):
@@ -740,27 +749,37 @@ def answer_card(label, body):
 
 
 def timeline_item(date, event, status, change_type, delta, title, url, is_last=False):
-    line_html = "" if is_last else '<div class="timeline-line"></div>'
-    st.markdown(
-        f"""
-        <div class="timeline-item">
-            <div class="timeline-marker">
-                <div class="timeline-dot"></div>
-                {line_html}
-            </div>
-            <div class="timeline-card">
-                <div class="timeline-date">{html.escape(date)}</div>
-                <h4>{html.escape(event)}</h4>
-                <p><strong>政策狀態：</strong>{html.escape(status)}</p>
-                <p><strong>Change Type：</strong>{html.escape(change_type)}</p>
-                <p><strong>Policy Delta：</strong>{html.escape(delta)}</p>
-                <p><strong>來源：</strong>{html.escape(title)}</p>
-                <p><strong>URL：</strong>{html.escape(url)}</p>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with st.container(border=True):
+        st.caption(f"{date}｜相關度：高度相關")
+        st.markdown(f"**{event}**")
+        st.markdown(
+            f"**政策狀態：** {status}  \n"
+            f"**Change Type：** {change_type}  \n"
+            f"**Policy Delta：** {truncate(delta, 80)}"
+        )
+        if url:
+            st.markdown(f"[查看原文]({url})")
+
+
+def compact_timeline_item(item, is_last=False):
+    date_value = normalize_date(item.get("date_doc") or item.get("date"))
+    title = item.get("title_doc") or item.get("title") or "未命名文件"
+    status = item.get("policy_status") or "資料庫文本"
+    change_type = item.get("issue_main") or "Policy Record"
+    delta = item.get("search_summary") or item.get("summary") or item.get("text") or ""
+    url = item.get("url") or ""
+    relevance = relevance_label(item.get("search_score"))
+
+    with st.container(border=True):
+        st.caption(f"{date_value}｜相關度：{relevance}")
+        st.markdown(f"**{title}**")
+        st.markdown(
+            f"**政策狀態：** {status}  \n"
+            f"**Change Type：** {change_type}  \n"
+            f"**摘要：** {truncate(delta, 80)}"
+        )
+        if url:
+            st.markdown(f"[查看原文]({url})")
 
 
 def status_card(mark, title, value, body):
@@ -778,80 +797,26 @@ def briefing_card(title, body):
 
 def live_search_section(master_df):
     st.markdown("## Live Search｜即時政策查詢")
-    query = st.text_input("輸入政策關鍵字", value="北士科", key="live_search_query")
-    results = live_policy_search(master_df, query, 10)
-    if not query.strip():
-        st.info("請輸入關鍵字。")
-        return []
-    if not results:
-        st.info("目前沒有找到相關文件。")
-        return []
-
-    st.caption(f"找到 {len(results)} 筆最相關結果")
-    for item in results:
-        result_card(item)
-    return results
-
-
-def live_timeline_section(master_df):
-    st.markdown("## Live Timeline｜政策演變查詢")
-    topic = st.text_input("輸入政策主題", value="敬老卡", key="live_timeline_topic")
-    st.button("查詢", key="run_live_timeline")
-    results = live_policy_search(master_df, topic, 10)
-
-    if not topic.strip():
-        st.info("請輸入政策主題。")
-        return
-    if not results:
-        st.info("目前沒有找到相關政策文本。")
-        return
-
-    dated_results = sorted(
-        results,
-        key=lambda item: normalize_date(item.get("date_doc") or item.get("date")),
+    topic = st.text_input(
+        "政策主題",
+        value="北士科",
+        placeholder="北士科、社宅、敬老卡、雙語教育",
+        key="module1_topic",
     )
-    for index, item in enumerate(dated_results):
-        date_value = normalize_date(item.get("date_doc") or item.get("date"))
-        title = item.get("title_doc") or item.get("title") or "未命名文件"
-        status = item.get("policy_status") or "資料庫文本"
-        change_type = item.get("issue_main") or "Policy Record"
-        delta = item.get("search_summary") or item.get("summary") or item.get("text") or ""
-        url = item.get("url") or ""
-        timeline_item(
-            date_value,
-            title,
-            status,
-            change_type,
-            truncate(delta, 180),
-            title,
-            url,
-            is_last=index == len(dated_results) - 1,
-        )
+    run_analysis = st.button("分析", key="run_module1_analysis")
+    if not run_analysis:
+        return []
 
-
-def gpt_analysis_section(master_df):
+    results = live_policy_search(master_df, topic, 10)
+    gpt_results = results[:5]
     st.markdown("## GPT Analysis")
-    question = st.text_input("問題", value="市府如何說明北士科與 AI 產業發展？", key="gpt_analysis_question")
-    search_query = st.text_input("搜尋關鍵字", value="北士科", key="gpt_analysis_search")
-    results = live_policy_search(master_df, search_query, 5)
-
-    st.markdown("#### GPT 流程")
-    st.markdown("問題 → 搜尋 → 前 5 筆 → GPT → 回答")
-
-    if results:
-        with st.container(border=True):
-            st.markdown("#### 送入 GPT 的前 5 筆搜尋結果")
-            for item in results:
-                result_card(item)
+    if not get_openai_api_key():
+        st.info("尚未啟用 GPT 分析。")
+    elif not gpt_results:
+        st.markdown(INSUFFICIENT_CONTEXT)
     else:
-        st.info("目前沒有可提供 GPT 分析的搜尋結果。")
-
-    if st.button("產生 GPT Analysis", key="run_gpt_analysis"):
-        if not results:
-            st.markdown(INSUFFICIENT_CONTEXT)
-            return
-
-        context = format_doc_context(results, 5)
+        question = f"請根據資料庫內容，說明「{topic}」相關政策重點。"
+        context = format_doc_context(gpt_results, 5)
         system_prompt = (
             "你是 TPIS 的政策資料分析助理。你只能根據使用者提供的搜尋結果回答，"
             "不得加入搜尋結果以外的事實、數字、承諾或推論。若資料不足，必須回答："
@@ -877,29 +842,74 @@ def gpt_analysis_section(master_df):
 """
         answer, error = generate_gpt_answer(system_prompt, user_prompt)
         if error:
-            st.info(error)
+            st.info("尚未啟用 GPT 分析。" if "OPENAI_API_KEY" in error else error)
         else:
             st.markdown(answer)
+
+    st.markdown("## 資料庫搜尋結果")
+    if not results:
+        st.info("目前沒有找到相關文件。")
+        return []
+
+    st.caption(f"找到 {len(results)} 筆最相關結果")
+    for item in results:
+        result_card(item)
+    return results
+
+
+def live_timeline_section(master_df):
+    st.markdown("## Live Timeline｜政策演變查詢")
+    topic = st.text_input(
+        "政策主題",
+        value="敬老卡",
+        placeholder="北士科、社宅、敬老卡、雙語教育",
+        key="live_timeline_topic",
+    )
+    run_query = st.button("查詢", key="run_live_timeline")
+    if not run_query:
+        return
+
+    results = live_policy_search(master_df, topic, 10)
+
+    if not topic.strip():
+        st.info("請輸入政策主題。")
+        return
+    if not results:
+        st.info("目前沒有找到相關政策文本。")
+        return
+
+    dated_results = sorted(
+        results,
+        key=lambda item: normalize_date(item.get("date_doc") or item.get("date")),
+    )
+    st.markdown("## 政策演變時間軸")
+    for index, item in enumerate(dated_results):
+        compact_timeline_item(item, is_last=index == len(dated_results) - 1)
+
+
+def gpt_analysis_section(master_df):
+    return None
 
 
 def gpt_consistency_section(master_df):
     st.markdown("## GPT Consistency Analysis")
-    topic = st.text_input("政策主題", value="社宅", key="gpt_consistency_topic")
+    topic = st.text_input(
+        "政策主題",
+        value="社宅",
+        placeholder="北士科、社宅、敬老卡、雙語教育",
+        key="gpt_consistency_topic",
+    )
+    run_analysis = st.button("分析", key="run_gpt_consistency")
+    if not run_analysis:
+        return
+
     results = live_policy_search(master_df, topic, 10)
 
-    if results:
-        with st.container(border=True):
-            st.markdown("#### 比較用搜尋結果")
-            for item in results[:10]:
-                result_card(item)
+    if not get_openai_api_key():
+        st.info("尚未啟用 GPT 分析。")
+    elif len(results) < 2:
+        st.markdown(INSUFFICIENT_CONTEXT)
     else:
-        st.info("目前沒有找到可比較的政策文本。")
-
-    if st.button("產生 GPT Consistency Analysis", key="run_gpt_consistency"):
-        if len(results) < 2:
-            st.markdown(INSUFFICIENT_CONTEXT)
-            return
-
         context = format_doc_context(results, 10)
         system_prompt = (
             "你是 TPIS 的政策一致性分析助理。你只能根據搜尋結果比較政策文本，"
@@ -931,29 +941,37 @@ def gpt_consistency_section(master_df):
 """
         answer, error = generate_gpt_answer(system_prompt, user_prompt)
         if error:
-            st.info(error)
+            st.info("尚未啟用 GPT 分析。" if "OPENAI_API_KEY" in error else error)
         else:
             st.markdown(answer)
+
+    st.markdown("## 資料庫搜尋結果")
+    if results:
+        for item in results[:10]:
+            result_card(item)
+    else:
+        st.info("目前沒有找到可比較的政策文本。")
 
 
 def gpt_briefing_section(master_df):
     st.markdown("## GPT Briefing")
-    topic = st.text_input("攻防主題", value="北士科 AI 政績", key="gpt_briefing_topic")
+    topic = st.text_input(
+        "政策主題",
+        value="北士科 AI 政績",
+        placeholder="北士科、社宅、敬老卡、雙語教育",
+        key="gpt_briefing_topic",
+    )
+    run_analysis = st.button("分析", key="run_gpt_briefing")
+    if not run_analysis:
+        return
+
     results = live_policy_search(master_df, topic, 10)
 
-    if results:
-        with st.container(border=True):
-            st.markdown("#### Briefing 使用的搜尋結果")
-            for item in results[:10]:
-                result_card(item)
+    if not get_openai_api_key():
+        st.info("尚未啟用 GPT 分析。")
+    elif not results:
+        st.markdown(INSUFFICIENT_CONTEXT)
     else:
-        st.info("目前沒有找到可整理 Briefing 的公開資料。")
-
-    if st.button("產生 GPT Briefing", key="run_gpt_briefing"):
-        if not results:
-            st.markdown(INSUFFICIENT_CONTEXT)
-            return
-
         context = format_doc_context(results, 10)
         system_prompt = (
             "你是 TPIS 的政策攻防簡報助理。你只能根據搜尋到的公開資料整理，"
@@ -975,9 +993,16 @@ def gpt_briefing_section(master_df):
 """
         answer, error = generate_gpt_answer(system_prompt, user_prompt)
         if error:
-            st.info(error)
+            st.info("尚未啟用 GPT 分析。" if "OPENAI_API_KEY" in error else error)
         else:
             st.markdown(answer)
+
+    st.markdown("## 資料庫搜尋結果")
+    if results:
+        for item in results[:10]:
+            result_card(item)
+    else:
+        st.info("目前沒有找到可整理 Briefing 的公開資料。")
 
 
 def footer():
@@ -1049,7 +1074,7 @@ with tabs[0]:
     st.markdown("### 五大模組成果")
     c1, c2, c3 = st.columns(3)
     with c1:
-        module_card("Module 1", "事實查詢", "以關鍵字與政策問題檢索資料庫，整理相關原文、摘要與回答依據。")
+        module_card("Module 1", "事實查詢", "以政策主題檢索資料庫，整理相關原文、摘要與回答依據。")
     with c2:
         module_card("Module 2", "議題分析", "統計主議題、次議題與月份趨勢，呈現政策注意力分布。")
     with c3:
@@ -1069,11 +1094,10 @@ with tabs[1]:
     st.markdown("快速搜尋公開政策文本，提供可追溯的引用依據。")
 
     live_search_section(master_df)
-    gpt_analysis_section(master_df)
 
     with st.expander("▼ 查看測試案例"):
         st.markdown("#### 查詢案例")
-        st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
+        st.markdown("- 政策主題：**北士科**\n- 測試提問：**提過北士科？**")
 
         st.markdown("### A. Fact Search 實測結果")
         for item in search_results[:5]:
@@ -1213,7 +1237,7 @@ with tabs[5]:
 
     with st.expander("▼ 查看測試案例"):
         st.markdown("#### 批評主題：北士科 AI 政績")
-        simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
+        simple_card("政策主題", "北士科、AI、產業發展、輝達、智慧城市")
         briefing_card(
             "🟢 資料顯示",
             "市府公開文本中，北士科經常與 AI、輝達、智慧城市、產業聚落、招商與科技治理等主題共同出現。這些文本呈現市府將北士科放在產業發展與智慧城市敘事中的脈絡，但仍需要進一步檢視哪些內容已落地、哪些仍屬規劃或招商階段。",
