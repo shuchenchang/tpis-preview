@@ -4,6 +4,11 @@ import html
 import pandas as pd
 import streamlit as st
 
+try:
+    from openai import OpenAI
+except ImportError:
+    OpenAI = None
+
 from modules.data_loader import get_data_summary, prepare_master_df, validate_data_files
 
 
@@ -15,6 +20,7 @@ STATIC_SUMMARY = {
 }
 
 PREVIEW_NOTICE = "展示範例，非即時分析。"
+INSUFFICIENT_CONTEXT = "目前資料不足，無法做明確判斷。"
 
 
 st.set_page_config(
@@ -110,6 +116,115 @@ def calculate_search_results(master_df, query="北士科", top_n=5):
         .head(top_n)
     )
     return results.to_dict("records")
+
+
+def live_policy_search(master_df, query, top_n=10):
+    if master_df is None or master_df.empty or not str(query).strip():
+        return []
+
+    query = str(query).strip()
+    terms = [term for term in query.split() if term] or [query]
+    df = master_df.copy()
+    search_fields = {
+        "title_doc": 8,
+        "title": 8,
+        "summary": 5,
+        "search_summary": 5,
+        "keywords": 4,
+        "issue_main": 3,
+        "issue_sub": 3,
+        "text": 1,
+    }
+    sort_fields = {
+        "title_doc": 4,
+        "title": 4,
+        "summary": 3,
+        "search_summary": 3,
+        "keywords": 2,
+        "text": 1,
+    }
+
+    df["search_score"] = 0
+    df["sort_score"] = 0
+    for col, weight in search_fields.items():
+        if col in df.columns:
+            text = df[col].fillna("").astype(str)
+            hit = pd.Series(False, index=df.index)
+            for term in terms:
+                hit = hit | text.str.contains(term, case=False, na=False, regex=False)
+            df["search_score"] += hit.astype(int) * weight
+    for col, weight in sort_fields.items():
+        if col in df.columns:
+            text = df[col].fillna("").astype(str)
+            hit = pd.Series(False, index=df.index)
+            for term in terms:
+                hit = hit | text.str.contains(term, case=False, na=False, regex=False)
+            df["sort_score"] += hit.astype(int) * weight
+
+    if "date_doc" in df.columns:
+        df["date_sort"] = pd.to_datetime(df["date_doc"], errors="coerce")
+    else:
+        df["date_sort"] = pd.NaT
+
+    results = (
+        df[df["search_score"] > 0]
+        .sort_values(["sort_score", "search_score", "date_sort"], ascending=[False, False, False])
+        .head(top_n)
+    )
+    return results.to_dict("records")
+
+
+def format_doc_context(results, limit=5, text_limit=850):
+    context_rows = []
+    for index, item in enumerate(results[:limit], start=1):
+        date_value = normalize_date(item.get("date_doc") or item.get("date"))
+        title = item.get("title_doc") or item.get("title") or "未命名文件"
+        issue_main = item.get("issue_main") or "未分類"
+        issue_sub = "、".join(parse_list_like(item.get("issue_sub"))) or "未標註"
+        summary = item.get("search_summary") or item.get("summary") or item.get("text") or ""
+        url = item.get("url") or ""
+        context_rows.append(
+            "\n".join(
+                [
+                    f"[{index}] 日期：{date_value}",
+                    f"標題：{title}",
+                    f"主議題：{issue_main}",
+                    f"次議題：{issue_sub}",
+                    f"摘要：{truncate(summary, text_limit)}",
+                    f"URL：{url}",
+                ]
+            )
+        )
+    return "\n\n".join(context_rows)
+
+
+def get_openai_api_key():
+    try:
+        return st.secrets["OPENAI_API_KEY"]
+    except Exception:
+        return None
+
+
+def generate_gpt_answer(system_prompt, user_prompt):
+    api_key = get_openai_api_key()
+    if not api_key:
+        return None, "尚未設定 OPENAI_API_KEY。"
+    if OpenAI is None:
+        return None, "尚未安裝 openai 套件。"
+
+    try:
+        client = OpenAI(api_key=api_key)
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.2,
+        )
+        return response.choices[0].message.content, None
+    except Exception as exc:
+        return None, f"GPT 功能暫時無法完成：{exc}"
 
 
 def issue_counts(master_df, column, top_n=10):
@@ -666,6 +781,171 @@ def preview_label(text=PREVIEW_NOTICE):
     st.warning(PREVIEW_NOTICE)
 
 
+def live_search_section(master_df):
+    st.markdown("## Live Search｜即時政策查詢")
+    query = st.text_input("輸入政策關鍵字", value="北士科", key="live_search_query")
+    results = live_policy_search(master_df, query, 10)
+    if not query.strip():
+        st.info("請輸入關鍵字。")
+        return []
+    if not results:
+        st.info("目前沒有找到相關文件。")
+        return []
+
+    st.caption(f"找到 {len(results)} 筆最相關結果")
+    for item in results:
+        result_card(item)
+    return results
+
+
+def gpt_analysis_section(master_df):
+    st.markdown("## GPT Analysis")
+    question = st.text_input("問題", value="市府如何說明北士科與 AI 產業發展？", key="gpt_analysis_question")
+    search_query = st.text_input("搜尋關鍵字", value="北士科", key="gpt_analysis_search")
+    results = live_policy_search(master_df, search_query, 5)
+
+    st.markdown("#### GPT 流程")
+    st.markdown("問題 → 搜尋 → 前 5 筆 → GPT → 回答")
+
+    if results:
+        with st.expander("查看送入 GPT 的前 5 筆搜尋結果"):
+            for item in results:
+                result_card(item)
+    else:
+        st.info("目前沒有可提供 GPT 分析的搜尋結果。")
+
+    if st.button("產生 GPT Analysis", key="run_gpt_analysis"):
+        if not results:
+            st.markdown(INSUFFICIENT_CONTEXT)
+            return
+
+        context = format_doc_context(results, 5)
+        system_prompt = (
+            "你是 TPIS 的政策資料分析助理。你只能根據使用者提供的搜尋結果回答，"
+            "不得加入搜尋結果以外的事實、數字、承諾或推論。若資料不足，必須回答："
+            f"{INSUFFICIENT_CONTEXT}"
+        )
+        user_prompt = f"""
+問題：{question}
+
+搜尋結果：
+{context}
+
+請只根據搜尋結果回答，格式如下：
+
+### 直接回答
+
+### 主要依據
+
+### 時間脈絡
+
+### 可追問問題
+
+### 引用資料
+"""
+        answer, error = generate_gpt_answer(system_prompt, user_prompt)
+        if error:
+            st.info(error)
+        else:
+            st.markdown(answer)
+
+
+def gpt_consistency_section(master_df):
+    st.markdown("## GPT Consistency Analysis")
+    topic = st.text_input("政策主題", value="社宅", key="gpt_consistency_topic")
+    results = live_policy_search(master_df, topic, 10)
+
+    if results:
+        with st.expander("查看比較用搜尋結果"):
+            for item in results[:10]:
+                result_card(item)
+    else:
+        st.info("目前沒有找到可比較的政策文本。")
+
+    if st.button("產生 GPT Consistency Analysis", key="run_gpt_consistency"):
+        if len(results) < 2:
+            st.markdown(INSUFFICIENT_CONTEXT)
+            return
+
+        context = format_doc_context(results, 10)
+        system_prompt = (
+            "你是 TPIS 的政策一致性分析助理。你只能根據搜尋結果比較政策文本，"
+            "不得生成沒有根據的內容。若資料不足，必須明確說明。"
+        )
+        user_prompt = f"""
+政策主題：{topic}
+
+請比較以下政策文本，判斷是否存在：
+- 立場改變
+- 承諾改變
+- 優先順序改變
+- 理由改變
+
+請引用具體證據。
+
+搜尋結果：
+{context}
+
+回答格式：
+
+### 整體判斷
+
+### 發現
+
+### 支持證據
+
+### 是否需要更多資料
+"""
+        answer, error = generate_gpt_answer(system_prompt, user_prompt)
+        if error:
+            st.info(error)
+        else:
+            st.markdown(answer)
+
+
+def gpt_briefing_section(master_df):
+    st.markdown("## GPT Briefing")
+    topic = st.text_input("攻防主題", value="北士科 AI 政績", key="gpt_briefing_topic")
+    results = live_policy_search(master_df, topic, 10)
+
+    if results:
+        with st.expander("查看 Briefing 使用的搜尋結果"):
+            for item in results[:10]:
+                result_card(item)
+    else:
+        st.info("目前沒有找到可整理 Briefing 的公開資料。")
+
+    if st.button("產生 GPT Briefing", key="run_gpt_briefing"):
+        if not results:
+            st.markdown(INSUFFICIENT_CONTEXT)
+            return
+
+        context = format_doc_context(results, 10)
+        system_prompt = (
+            "你是 TPIS 的政策攻防簡報助理。你只能根據搜尋到的公開資料整理，"
+            "不得生成沒有根據的內容，必須引用搜尋結果。"
+        )
+        user_prompt = f"""
+攻防主題：{topic}
+
+請根據搜尋到的公開資料整理：
+- 資料顯示
+- 可質疑
+- 可追問
+- 可引用
+
+搜尋結果：
+{context}
+
+回答時必須引用搜尋結果，不得生成沒有根據的內容。
+"""
+        answer, error = generate_gpt_answer(system_prompt, user_prompt)
+        if error:
+            st.info(error)
+        else:
+            st.markdown(answer)
+
+
 def footer():
     st.divider()
     st.caption("TPIS")
@@ -732,7 +1012,6 @@ with tabs[0]:
             ("版本", "v0.2 Colab Results Showcase"),
         ]
     )
-    system_workflow()
 
     st.markdown("### 五大模組成果")
     c1, c2, c3 = st.columns(3)
@@ -747,6 +1026,7 @@ with tabs[0]:
         module_card("Module 4", "政策一致性分析", "比較不同文本之間的立場、承諾、優先順序與理由變化。")
     with c5:
         module_card("Module 5", "攻防分析", "整理政策依據、可追問方向、攻防強度與需要補強的資料。")
+    system_workflow()
     footer()
 
 
@@ -755,6 +1035,9 @@ with tabs[1]:
     st.header("事實查詢")
     st.markdown("快速搜尋公開政策文本，提供可追溯的引用依據。")
     preview_label()
+
+    live_search_section(master_df)
+    gpt_analysis_section(master_df)
 
     st.markdown("#### 查詢案例")
     st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
@@ -867,6 +1150,7 @@ with tabs[4]:
     st.header("政策一致性分析")
     st.markdown("比較不同時期政策內容，辨識可能的立場與策略變化。")
     preview_label()
+    gpt_consistency_section(master_df)
     
     c1, c2 = st.columns(2)
     with c1:
@@ -893,6 +1177,7 @@ with tabs[5]:
     st.header("攻防分析")
     st.markdown("根據公開資料整理可引用資訊、可質疑重點與追問方向。")
     preview_label()
+    gpt_briefing_section(master_df)
    
     st.markdown("#### 批評主題：北士科 AI 政績")
     simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
