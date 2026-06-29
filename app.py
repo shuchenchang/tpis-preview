@@ -91,9 +91,7 @@ def relevance_label(score):
         score = 0
     if score >= 20:
         return "高度相關"
-    if score >= 10:
-        return "相關"
-    if score >= 4:
+    if score >= 6:
         return "中度相關"
     return "低度相關"
 
@@ -648,6 +646,32 @@ def inject_styles():
             color: var(--text);
         }
 
+        [data-testid="InputInstructions"] {
+            display: none;
+        }
+
+        [data-baseweb="input"] {
+            border-color: var(--border) !important;
+            box-shadow: none !important;
+        }
+
+        [data-baseweb="input"]:focus-within {
+            border-color: var(--primary) !important;
+            box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.18) !important;
+        }
+
+        .stButton button[kind="primary"] {
+            background: #FF7A1A;
+            border-color: #FF7A1A;
+            color: #FFFFFF;
+        }
+
+        .stButton button[kind="primary"]:hover {
+            background: #E86A00;
+            border-color: #E86A00;
+            color: #FFFFFF;
+        }
+
         @media (max-width: 760px) {
             .block-container {
                 padding-left: 1rem;
@@ -692,23 +716,6 @@ def kpi_grid(items):
         with st.container(border=True):
             st.caption(label)
             st.markdown(f"### {value}")
-
-
-def system_workflow():
-    steps = [
-        "Public Documents",
-        "AI Metadata",
-        "Policy Database",
-        "Search",
-        "Analysis",
-        "Briefing",
-    ]
-    st.markdown("## System Workflow")
-    for index, step in enumerate(steps):
-        with st.container(border=True):
-            st.markdown(f"**{step}**")
-        if index < len(steps) - 1:
-            st.markdown("↓")
 
 
 def module_card(module, title, body):
@@ -796,14 +803,17 @@ def briefing_card(title, body):
 
 
 def live_search_section(master_df):
-    st.markdown("## Live Search｜即時政策查詢")
     topic = st.text_input(
         "政策主題",
         value="北士科",
         placeholder="北士科、社宅、敬老卡、雙語教育",
         key="module1_topic",
     )
-    run_analysis = st.button("分析", key="run_module1_analysis")
+    run_analysis = st.button(
+        "查詢",
+        key="run_module1_analysis",
+        type="primary" if topic.strip() else "secondary",
+    )
     if not run_analysis:
         return []
 
@@ -858,14 +868,17 @@ def live_search_section(master_df):
 
 
 def live_timeline_section(master_df):
-    st.markdown("## Live Timeline｜政策演變查詢")
     topic = st.text_input(
         "政策主題",
         value="敬老卡",
         placeholder="北士科、社宅、敬老卡、雙語教育",
         key="live_timeline_topic",
     )
-    run_query = st.button("查詢", key="run_live_timeline")
+    run_query = st.button(
+        "查詢",
+        key="run_live_timeline",
+        type="primary" if topic.strip() else "secondary",
+    )
     if not run_query:
         return
 
@@ -892,14 +905,17 @@ def gpt_analysis_section(master_df):
 
 
 def gpt_consistency_section(master_df):
-    st.markdown("## GPT Consistency Analysis")
     topic = st.text_input(
         "政策主題",
         value="社宅",
         placeholder="北士科、社宅、敬老卡、雙語教育",
         key="gpt_consistency_topic",
     )
-    run_analysis = st.button("分析", key="run_gpt_consistency")
+    run_analysis = st.button(
+        "分析",
+        key="run_gpt_consistency",
+        type="primary" if topic.strip() else "secondary",
+    )
     if not run_analysis:
         return
 
@@ -954,14 +970,17 @@ def gpt_consistency_section(master_df):
 
 
 def gpt_briefing_section(master_df):
-    st.markdown("## GPT Briefing")
     topic = st.text_input(
         "政策主題",
         value="北士科 AI 政績",
         placeholder="北士科、社宅、敬老卡、雙語教育",
         key="gpt_briefing_topic",
     )
-    run_analysis = st.button("分析", key="run_gpt_briefing")
+    run_analysis = st.button(
+        "分析",
+        key="run_gpt_briefing",
+        type="primary" if topic.strip() else "secondary",
+    )
     if not run_analysis:
         return
 
@@ -1076,7 +1095,7 @@ with tabs[0]:
     with c1:
         module_card("Module 1", "事實查詢", "以政策主題檢索資料庫，整理相關原文、摘要與回答依據。")
     with c2:
-        module_card("Module 2", "議題分析", "統計主議題、次議題與月份趨勢，呈現政策注意力分布。")
+        module_card("Module 2", "議題分布", "統計主議題、次議題與月份趨勢，呈現政策注意力分布。")
     with c3:
         module_card("Module 3", "政策演變", "依時間排序同一政策議題，觀察政策狀態與論述重點如何改變。")
     c4, c5 = st.columns(2)
@@ -1084,7 +1103,6 @@ with tabs[0]:
         module_card("Module 4", "政策一致性分析", "比較不同文本之間的立場、承諾、優先順序與理由變化。")
     with c5:
         module_card("Module 5", "攻防分析", "整理政策依據、可追問方向、攻防強度與需要補強的資料。")
-    system_workflow()
     footer()
 
 
@@ -1125,8 +1143,8 @@ with tabs[1]:
 
 with tabs[2]:
     st.caption("Module 2")
-    st.header("議題分析")
-    st.markdown("自動統計政策議題分類、關注重點與議題分布。")
+    st.header("議題分布")
+    st.markdown("自動統計政策分類、關注重點與議題分布。")
 
     st.markdown("### 1. 主議題排行榜")
     st.dataframe(main_rank, use_container_width=True, hide_index=True)
