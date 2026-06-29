@@ -19,7 +19,6 @@ STATIC_SUMMARY = {
     "issue_main_count": 18,
 }
 
-PREVIEW_NOTICE = "展示範例，非即時分析。"
 INSUFFICIENT_CONTEXT = "目前資料不足，無法做明確判斷。"
 
 
@@ -777,10 +776,6 @@ def briefing_card(title, body):
         st.markdown(body)
 
 
-def preview_label(text=PREVIEW_NOTICE):
-    st.warning(PREVIEW_NOTICE)
-
-
 def live_search_section(master_df):
     st.markdown("## Live Search｜即時政策查詢")
     query = st.text_input("輸入政策關鍵字", value="北士科", key="live_search_query")
@@ -798,6 +793,42 @@ def live_search_section(master_df):
     return results
 
 
+def live_timeline_section(master_df):
+    st.markdown("## Live Timeline｜政策演變查詢")
+    topic = st.text_input("輸入政策主題", value="敬老卡", key="live_timeline_topic")
+    st.button("查詢", key="run_live_timeline")
+    results = live_policy_search(master_df, topic, 10)
+
+    if not topic.strip():
+        st.info("請輸入政策主題。")
+        return
+    if not results:
+        st.info("目前沒有找到相關政策文本。")
+        return
+
+    dated_results = sorted(
+        results,
+        key=lambda item: normalize_date(item.get("date_doc") or item.get("date")),
+    )
+    for index, item in enumerate(dated_results):
+        date_value = normalize_date(item.get("date_doc") or item.get("date"))
+        title = item.get("title_doc") or item.get("title") or "未命名文件"
+        status = item.get("policy_status") or "資料庫文本"
+        change_type = item.get("issue_main") or "Policy Record"
+        delta = item.get("search_summary") or item.get("summary") or item.get("text") or ""
+        url = item.get("url") or ""
+        timeline_item(
+            date_value,
+            title,
+            status,
+            change_type,
+            truncate(delta, 180),
+            title,
+            url,
+            is_last=index == len(dated_results) - 1,
+        )
+
+
 def gpt_analysis_section(master_df):
     st.markdown("## GPT Analysis")
     question = st.text_input("問題", value="市府如何說明北士科與 AI 產業發展？", key="gpt_analysis_question")
@@ -808,7 +839,8 @@ def gpt_analysis_section(master_df):
     st.markdown("問題 → 搜尋 → 前 5 筆 → GPT → 回答")
 
     if results:
-        with st.expander("查看送入 GPT 的前 5 筆搜尋結果"):
+        with st.container(border=True):
+            st.markdown("#### 送入 GPT 的前 5 筆搜尋結果")
             for item in results:
                 result_card(item)
     else:
@@ -856,7 +888,8 @@ def gpt_consistency_section(master_df):
     results = live_policy_search(master_df, topic, 10)
 
     if results:
-        with st.expander("查看比較用搜尋結果"):
+        with st.container(border=True):
+            st.markdown("#### 比較用搜尋結果")
             for item in results[:10]:
                 result_card(item)
     else:
@@ -909,7 +942,8 @@ def gpt_briefing_section(master_df):
     results = live_policy_search(master_df, topic, 10)
 
     if results:
-        with st.expander("查看 Briefing 使用的搜尋結果"):
+        with st.container(border=True):
+            st.markdown("#### Briefing 使用的搜尋結果")
             for item in results[:10]:
                 result_card(item)
     else:
@@ -950,7 +984,7 @@ def footer():
     st.divider()
     st.caption("TPIS")
     st.caption("Taipei Policy Intelligence Search")
-    st.caption("Version 0.2 Colab Results Showcase · 2026")
+    st.caption("Version 0.3 Interactive Preview · 2026")
 
 
 master_df, summary, loaded_from_data = load_public_data("data")
@@ -974,8 +1008,8 @@ with st.sidebar:
     if loaded_from_data:
         st.success("已讀取公開資料摘要")
     else:
-        st.info("使用展示版預設摘要")
-    st.caption("Colab 實測成果展示｜公開版不連接 API")
+        st.info("使用預設資料摘要")
+    st.caption("TPIS Interactive Preview")
 
 
 tabs = st.tabs(
@@ -991,14 +1025,13 @@ tabs = st.tabs(
 
 
 with tabs[0]:
-    st.caption("v0.2 Colab Results Showcase")
+    st.caption("v0.3 Interactive Preview")
     st.title("TPIS")
     st.subheader("Taipei Policy Intelligence Search")
     st.markdown(
         "AI-powered policy intelligence platform for structured retrieval, "
         "analysis and briefing of public policy documents."
     )
-    preview_label()
     st.markdown("臺北市政策智慧分析平台")
     st.markdown(
         "TPIS 是一個以臺北市公開市政文本為基礎的政策智慧分析原型，"
@@ -1009,7 +1042,7 @@ with tabs[0]:
             ("公開文件", f"{summary['rows']:,}"),
             ("政策主題", f"{summary['issue_main_count']}"),
             ("資料期間", f"{summary['date_min']} 至 {summary['date_max']}"),
-            ("版本", "v0.2 Colab Results Showcase"),
+            ("版本", "v0.3 Interactive Preview"),
         ]
     )
 
@@ -1034,35 +1067,35 @@ with tabs[1]:
     st.caption("Module 1")
     st.header("事實查詢")
     st.markdown("快速搜尋公開政策文本，提供可追溯的引用依據。")
-    preview_label()
 
     live_search_section(master_df)
     gpt_analysis_section(master_df)
 
-    st.markdown("#### 查詢案例")
-    st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
+    with st.expander("▼ 查看測試案例"):
+        st.markdown("#### 查詢案例")
+        st.markdown("- 查詢詞：**北士科**\n- 問題：**提過北士科？**")
 
-    st.markdown("### A. Fact Search 實測結果")
-    for item in search_results[:5]:
-        result_card(item)
+        st.markdown("### A. Fact Search 實測結果")
+        for item in search_results[:5]:
+            result_card(item)
 
-    st.markdown("### B. GPT Answer 實測結果")
-    answer_card(
-        "Question",
-        "提過北士科？",
-    )
-    answer_card(
-        "Answer",
-        "公開文本中多次提到北士科，內容主要集中在產業發展、科技聚落、重大投資、輝達進駐、智慧城市與 AI 應用等政策脈絡。",
-    )
-    answer_card(
-        "Evidence",
-        "資料庫可找到北士科相關新聞稿與市政文本，包含產業招商、科技園區發展、就業人口估算、交通影響評估與智慧治理應用等內容。",
-    )
-    answer_card(
-        "Sources",
-        "Fact Search 前 5 筆結果顯示，北士科常與 AI、產業聚落、輝達、智慧治理、都市發展與交通規劃共同出現。",
-    )
+        st.markdown("### B. GPT Answer 實測結果")
+        answer_card(
+            "Question",
+            "提過北士科？",
+        )
+        answer_card(
+            "Answer",
+            "公開文本中多次提到北士科，內容主要集中在產業發展、科技聚落、重大投資、輝達進駐、智慧城市與 AI 應用等政策脈絡。",
+        )
+        answer_card(
+            "Evidence",
+            "資料庫可找到北士科相關新聞稿與市政文本，包含產業招商、科技園區發展、就業人口估算、交通影響評估與智慧治理應用等內容。",
+        )
+        answer_card(
+            "Sources",
+            "Fact Search 前 5 筆結果顯示，北士科常與 AI、產業聚落、輝達、智慧治理、都市發展與交通規劃共同出現。",
+        )
     footer()
 
 
@@ -1070,7 +1103,6 @@ with tabs[2]:
     st.caption("Module 2")
     st.header("議題分析")
     st.markdown("自動統計政策議題分類、關注重點與議題分布。")
-    preview_label()
 
     st.markdown("### 1. 主議題排行榜")
     st.dataframe(main_rank, use_container_width=True, hide_index=True)
@@ -1098,50 +1130,51 @@ with tabs[3]:
     st.caption("Module 3")
     st.header("政策演變")
     st.markdown("依時間軸整理政策發展歷程，觀察重要調整與演變。")
-    preview_label()
- 
-    st.markdown("#### 主題：敬老卡")
-    timeline_item(
-        "2026-06-22",
-        "敬老卡 600 點上路與重陽禮金時程說明",
-        "政策擴充",
-        "Benefit Expansion",
-        "每月點數由 480 點提高至 600 點，並規劃新增生活消費通路與點數累積機制。",
-        "宣布敬老福利再升級 敬老卡600點7月上路、重陽禮金9月發放",
-        "https://www.gov.taipei/",
-    )
-    timeline_item(
-        "2026-06-10",
-        "關懷獨居長者並說明敬老措施",
-        "政策延伸",
-        "Service Integration",
-        "敬老卡點數提高與志工關懷、高齡照顧據點等長者支持措施共同納入高齡友善政策敘事。",
-        "「陪伴不缺席」關懷獨居長者 蔣萬安號召全民加入志工行列",
-        "https://www.gov.taipei/",
-    )
-    timeline_item(
-        "2025-10-29",
-        "市政總質詢回應敬老點數使用範圍",
-        "滾動評估",
-        "Scope Review",
-        "除提高點數外，進一步評估合作場域、累積機制與使用誘因。",
-        "赴議會報告追加預算及總預算案",
-        "https://www.gov.taipei/",
-    )
-    timeline_item(
-        "2025-03-05",
-        "高齡友善與長者福利措施納入市政討論",
-        "政策延伸",
-        "Framing Shift",
-        "敬老卡從交通補助延伸到高齡友善、生活支持與社會參與政策。",
-        "臺北市政府市政會議紀錄",
-        "https://www.gov.taipei/",
 
-    )
-    simple_card(
-        "整體時間軸觀察",
-        "敬老卡政策從既有交通與場館使用補助，逐步擴充到點數提高、醫療與生活消費場域、點數累積與高齡友善城市敘事。政策論述重點由單一福利工具，轉向長者生活支持與城市照顧系統。",
-    )
+    live_timeline_section(master_df)
+
+    with st.expander("▼ 查看測試案例"):
+        st.markdown("#### 主題：敬老卡")
+        timeline_item(
+            "2026-06-22",
+            "敬老卡 600 點上路與重陽禮金時程說明",
+            "政策擴充",
+            "Benefit Expansion",
+            "每月點數由 480 點提高至 600 點，並規劃新增生活消費通路與點數累積機制。",
+            "宣布敬老福利再升級 敬老卡600點7月上路、重陽禮金9月發放",
+            "https://www.gov.taipei/",
+        )
+        timeline_item(
+            "2026-06-10",
+            "關懷獨居長者並說明敬老措施",
+            "政策延伸",
+            "Service Integration",
+            "敬老卡點數提高與志工關懷、高齡照顧據點等長者支持措施共同納入高齡友善政策敘事。",
+            "「陪伴不缺席」關懷獨居長者 蔣萬安號召全民加入志工行列",
+            "https://www.gov.taipei/",
+        )
+        timeline_item(
+            "2025-10-29",
+            "市政總質詢回應敬老點數使用範圍",
+            "滾動評估",
+            "Scope Review",
+            "除提高點數外，進一步評估合作場域、累積機制與使用誘因。",
+            "赴議會報告追加預算及總預算案",
+            "https://www.gov.taipei/",
+        )
+        timeline_item(
+            "2025-03-05",
+            "高齡友善與長者福利措施納入市政討論",
+            "政策延伸",
+            "Framing Shift",
+            "敬老卡從交通補助延伸到高齡友善、生活支持與社會參與政策。",
+            "臺北市政府市政會議紀錄",
+            "https://www.gov.taipei/",
+        )
+        simple_card(
+            "整體時間軸觀察",
+            "敬老卡政策從既有交通與場館使用補助，逐步擴充到點數提高、醫療與生活消費場域、點數累積與高齡友善城市敘事。政策論述重點由單一福利工具，轉向長者生活支持與城市照顧系統。",
+        )
     footer()
 
 
@@ -1149,26 +1182,26 @@ with tabs[4]:
     st.caption("Module 4")
     st.header("政策一致性分析")
     st.markdown("比較不同時期政策內容，辨識可能的立場與策略變化。")
-    preview_label()
     gpt_consistency_section(master_df)
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        simple_card("比較對象 A", "早期敬老卡文本：聚焦交通補助、公有場館使用與基本長者福利。")
-    with c2:
-        simple_card("比較對象 B", "近期敬老卡文本：聚焦 600 點、生活消費通路、點數累積與高齡友善城市。")
 
-    st.markdown("#### 分析面向")
-    status_card("✓", "立場", "無明顯改變", "整體立場延續支持長者福利。")
-    status_card("△", "承諾", "部分調整", "從維持既有服務，擴充為點數提高與通路增加。")
-    status_card("△", "優先順序", "部分調整", "從交通便利轉向生活支持與社會參與。")
-    status_card("△", "理由", "新增說明", "從補助工具轉為高齡友善城市治理。")
+    with st.expander("▼ 查看測試案例"):
+        c1, c2 = st.columns(2)
+        with c1:
+            simple_card("比較對象 A", "早期敬老卡文本：聚焦交通補助、公有場館使用與基本長者福利。")
+        with c2:
+            simple_card("比較對象 B", "近期敬老卡文本：聚焦 600 點、生活消費通路、點數累積與高齡友善城市。")
 
-    st.markdown("#### 輸出結果")
-    simple_card("是否存在明顯變化", "有。變化主要是政策範圍擴充，不是立場反轉。")
-    simple_card("變化類型", "政策擴充、服務場域擴大、政策敘事升級。")
-    simple_card("依據摘要", "近期文本增加 600 點、超商超市藥局農會等生活消費通路，以及第二代敬老卡與點數累積規劃。")
-    simple_card("風險提醒", "若只看單一文本，可能忽略政策由交通補助擴展到生活支持的演變；正式分析仍需附上原文與日期。")
+        st.markdown("#### 分析面向")
+        status_card("✓", "立場", "無明顯改變", "整體立場延續支持長者福利。")
+        status_card("△", "承諾", "部分調整", "從維持既有服務，擴充為點數提高與通路增加。")
+        status_card("△", "優先順序", "部分調整", "從交通便利轉向生活支持與社會參與。")
+        status_card("△", "理由", "新增說明", "從補助工具轉為高齡友善城市治理。")
+
+        st.markdown("#### 輸出結果")
+        simple_card("是否存在明顯變化", "有。變化主要是政策範圍擴充，不是立場反轉。")
+        simple_card("變化類型", "政策擴充、服務場域擴大、政策敘事升級。")
+        simple_card("依據摘要", "近期文本增加 600 點、超商超市藥局農會等生活消費通路，以及第二代敬老卡與點數累積規劃。")
+        simple_card("風險提醒", "若只看單一文本，可能忽略政策由交通補助擴展到生活支持的演變；正式分析仍需附上原文與日期。")
     footer()
 
 
@@ -1176,25 +1209,25 @@ with tabs[5]:
     st.caption("Module 5")
     st.header("攻防分析")
     st.markdown("根據公開資料整理可引用資訊、可質疑重點與追問方向。")
-    preview_label()
     gpt_briefing_section(master_df)
-   
-    st.markdown("#### 批評主題：北士科 AI 政績")
-    simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
-    briefing_card(
-        "🟢 資料顯示",
-        "市府公開文本中，北士科經常與 AI、輝達、智慧城市、產業聚落、招商與科技治理等主題共同出現。這些文本呈現市府將北士科放在產業發展與智慧城市敘事中的脈絡，但仍需要進一步檢視哪些內容已落地、哪些仍屬規劃或招商階段。",
-    )
-    briefing_card(
-        "🔴 可質疑",
-        "可追問是否已有具體落地成果、是否有明確 KPI、是否已有企業正式進駐與營運數據、交通承載與土地程序是否同步說明、公共利益如何衡量，以及相關敘事是否仍停留在願景包裝而非可驗證政績。",
-    )
-    briefing_card(
-        "🟡 可追問",
-        "目前北士科已有多少 AI 相關企業正式進駐？輝達相關投資是否已有明確時程與可公開契約？市府所稱 AI 產業成果，有沒有產值、就業或招商 KPI？交通承載、土地程序與公共設施是否已同步到位？哪些成果已完成，哪些仍只是規劃或招商階段？",
-    )
-    briefing_card(
-        "📄 可引用",
-        "可引用市府新聞稿、市政會議資料，以及北士科、AI、輝達、招商、智慧城市相關公開文本。需要補強的資料包括預算、工程進度、KPI、招商成果、正式進駐與營運數據、交通評估、土地程序與公共利益指標。",
-    )
+
+    with st.expander("▼ 查看測試案例"):
+        st.markdown("#### 批評主題：北士科 AI 政績")
+        simple_card("搜尋關鍵字", "北士科、AI、產業發展、輝達、智慧城市")
+        briefing_card(
+            "🟢 資料顯示",
+            "市府公開文本中，北士科經常與 AI、輝達、智慧城市、產業聚落、招商與科技治理等主題共同出現。這些文本呈現市府將北士科放在產業發展與智慧城市敘事中的脈絡，但仍需要進一步檢視哪些內容已落地、哪些仍屬規劃或招商階段。",
+        )
+        briefing_card(
+            "🔴 可質疑",
+            "可追問是否已有具體落地成果、是否有明確 KPI、是否已有企業正式進駐與營運數據、交通承載與土地程序是否同步說明、公共利益如何衡量，以及相關敘事是否仍停留在願景包裝而非可驗證政績。",
+        )
+        briefing_card(
+            "🟡 可追問",
+            "目前北士科已有多少 AI 相關企業正式進駐？輝達相關投資是否已有明確時程與可公開契約？市府所稱 AI 產業成果，有沒有產值、就業或招商 KPI？交通承載、土地程序與公共設施是否已同步到位？哪些成果已完成，哪些仍只是規劃或招商階段？",
+        )
+        briefing_card(
+            "📄 可引用",
+            "可引用市府新聞稿、市政會議資料，以及北士科、AI、輝達、招商、智慧城市相關公開文本。需要補強的資料包括預算、工程進度、KPI、招商成果、正式進駐與營運數據、交通評估、土地程序與公共利益指標。",
+        )
     footer()
