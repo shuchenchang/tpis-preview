@@ -1060,7 +1060,7 @@ tabs = st.tabs(
     [
         "系統總覽",
         "事實查詢",
-        "議題分析",
+        "議題分布",
         "政策演變",
         "政策一致性",
         "攻防分析",
@@ -1222,7 +1222,7 @@ with tabs[3]:
 
 with tabs[4]:
     st.caption("Module 4")
-    st.header("政策一致性分析")
+    st.header("政策一致性")
     st.markdown("比較不同時期政策內容，辨識可能的立場與策略變化。")
     gpt_consistency_section(master_df)
 
